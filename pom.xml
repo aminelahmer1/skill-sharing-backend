@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+		 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<!-- Informations de base du projet -->
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>3.4.2</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+
+	<groupId>com.example</groupId>
+	<artifactId>Skill_Sharing</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>Skill_Sharing</name>
+	<description>Projet Skill Sharing - Plateforme d'échange de compétences</description>
+	<packaging>pom</packaging> <!-- Le packaging est "pom" pour un projet parent -->
+
+	<properties>
+		<java.version>17</java.version>
+		<spring-boot.version>3.4.2</spring-boot.version>
+		<lombok.version>1.18.30</lombok.version> <!-- Version explicite de Lombok -->
+	</properties>
+
+	<!-- Modules du projet -->
+	<modules>
+		<module>service-user</module> <!-- Exemple de module -->
+		<!-- Ajoutez d'autres modules ici (ex: service-messaging, service-evaluation) -->
+	</modules>
+
+	<!-- Gestion des dépendances -->
+	<dependencyManagement>
+		<dependencies>
+			<!-- Spring Boot BOM (Bill of Materials) -->
+			<dependency>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-dependencies</artifactId>
+				<version>${spring-boot.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+
+			<!-- Dépendances communes -->
+			<dependency>
+				<groupId>org.projectlombok</groupId>
+				<artifactId>lombok</artifactId>
+				<version>${lombok.version}</version>
+				<scope>provided</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
+	<!-- Dépendances communes à tous les modules -->
+	<dependencies>
+		<!-- Spring Boot Starter pour les tests -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<!-- Plugin Spring Boot pour le packaging et l'exécution -->
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+</project>
