@@ -28,7 +28,7 @@
 	<!-- Modules du projet -->
 	<modules>
 		<module>service-user</module> <!-- Exemple de module -->
-		<!-- Ajoutez d'autres modules ici (ex: service-messaging, service-evaluation) -->
+		<module>discovery</module>
 	</modules>
 
 	<!-- Gestion des dépendances -->
