@@ -22,6 +22,7 @@
         <java.version>17</java.version>
         <lombok.version>1.18.30</lombok.version> <!-- Version explicite de Lombok -->
         <jjwt.version>0.11.5</jjwt.version> <!-- Version de JJWT -->
+        <spring-cloud.version>2024.0.0</spring-cloud.version><!-- Version de Spring Cloud -->
     </properties>
 
     <dependencies>
@@ -73,6 +74,24 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Eureka Discovery Client -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+
+        <!-- Config Client -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-config</artifactId>
+        </dependency>
+
+        <!-- Validation -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
         <!-- Dépendances de test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -91,10 +110,7 @@
             <version>3.1.0</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
-        </dependency>
+
 
         <dependency>
             <groupId>jakarta.servlet</groupId>
@@ -107,6 +123,19 @@
             <artifactId>spring-boot-autoconfigure</artifactId>
         </dependency>
     </dependencies>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Gestion des versions de Spring Cloud -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
         <plugins>
