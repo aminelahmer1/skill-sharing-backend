@@ -1,11 +1,9 @@
 package com.example.serviceuser.controller;
 
-import com.example.serviceuser.entity.User;
-import com.example.serviceuser.repository.UserRepository;
+import com.example.serviceuser.dto.UserDTO;
 import com.example.serviceuser.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -17,19 +15,13 @@ import java.util.Map;
 public class AuthController {
 
     @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
     private UserService userService;
 
     @PostMapping("/register")
-    public ResponseEntity<Map<String, String>> register(@RequestBody User user) {
+    public ResponseEntity<Map<String, String>> register(@RequestBody UserDTO userDTO) {
         Map<String, String> response = new HashMap<>();
         try {
-            String result = userService.registerUser(user);
+            String result = userService.registerUser(userDTO);
             response.put("message", result);
             return ResponseEntity.ok(response);
         } catch (RuntimeException e) {

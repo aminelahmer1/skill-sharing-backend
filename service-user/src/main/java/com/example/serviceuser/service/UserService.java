@@ -1,6 +1,7 @@
 package com.example.serviceuser.service;
 
 import com.example.serviceuser.config.JwtUtil;
+import com.example.serviceuser.dto.UserDTO;
 import com.example.serviceuser.entity.User;
 import com.example.serviceuser.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,16 +18,22 @@ public class UserService {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
     @Autowired
     private JwtUtil jwtUtil;
 
     // Méthode pour enregistrer un utilisateur
-    public String registerUser(User user) {
-        if (userRepository.findByEmail(user.getEmail()) != null) {
+    public String registerUser(UserDTO userDTO) {
+        if (userRepository.findByEmail(userDTO.email()) != null) {
             throw new RuntimeException("Email already in use!");
         }
 
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        User user = new User();
+        user.setUsername(userDTO.username());
+        user.setEmail(userDTO.email());
+        user.setPassword(passwordEncoder.encode(userDTO.password()));
+        user.setRole(userDTO.role());
+
         userRepository.save(user);
         return "User registered successfully!";
     }
@@ -41,6 +48,7 @@ public class UserService {
         return Optional.ofNullable(userRepository.findByEmail(email));
     }
 
+    // Connexion d'un utilisateur
     public String loginUser(String email, String password) {
         User user = userRepository.findByEmail(email);
 
@@ -55,8 +63,9 @@ public class UserService {
         // Générer un token JWT
         return jwtUtil.generateToken(user.getEmail(), user.getRole().name());
     }
+
+    // Déconnexion
     public void logout(String token) {
         jwtUtil.invalidateToken(token);
     }
-
 }

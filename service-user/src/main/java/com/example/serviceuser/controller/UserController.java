@@ -21,7 +21,7 @@ public class UserController {
 
     @Autowired
     private UserRepository userRepository;
-
+/*
     @GetMapping("/profile")
     public Map<String, Object> getProfile() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -41,5 +41,5 @@ public class UserController {
         }
 
         return profile;
-    }
+    }*/
 }
