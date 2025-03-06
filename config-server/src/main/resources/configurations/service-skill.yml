@@ -1,0 +1,17 @@
+server:
+  port: 8050 # ou 8050 pour service-skill, etc.
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/SkillSharing_Skills
+    username: postgres
+    password: admin
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
