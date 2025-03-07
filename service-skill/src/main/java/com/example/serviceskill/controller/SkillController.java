@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/v1/skills") // Versioning de l'API
+@RequestMapping("/skills")
 @RequiredArgsConstructor
 public class SkillController {
 
@@ -40,6 +40,29 @@ public class SkillController {
     }
 
     // Mettre à jour une compétence
+    @PutMapping("/update/{skill-id}")
+    public ResponseEntity<SkillResponse> updateSkill(
+            @PathVariable("skill-id") Integer skillId,
+            @RequestBody @Valid SkillRequest request
+    ) {
+        return ResponseEntity.ok(service.updateSkill(skillId, request));
+    }
 
+    // Supprimer une compétence
+    @DeleteMapping("/delete/{skill-id}")
+    public ResponseEntity<Void> deleteSkill(
+            @PathVariable("skill-id") Integer skillId
+    ) {
+        service.deleteSkill(skillId);
+        return ResponseEntity.noContent().build();
+    }
 
+    // Incrémenter le compteur d'inscriptions
+    @PostMapping("/{skill-id}/increment")
+    public ResponseEntity<Void> incrementNbInscrits(
+            @PathVariable("skill-id") Integer skillId
+    ) {
+        service.incrementNbInscrits(skillId);
+        return ResponseEntity.noContent().build();
+    }
 }

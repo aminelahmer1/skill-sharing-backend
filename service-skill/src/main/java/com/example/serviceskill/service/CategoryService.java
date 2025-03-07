@@ -2,6 +2,8 @@ package com.example.serviceskill.service;
 
 import com.example.serviceskill.dto.CategoryRequest;
 import com.example.serviceskill.dto.CategoryResponse;
+import com.example.serviceskill.entity.Category;
+import com.example.serviceskill.handler.CategoryNotFoundException;
 import com.example.serviceskill.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -27,4 +29,28 @@ public class CategoryService {
                 .map(mapper::toCategoryResponse)
                 .collect(Collectors.toList());
     }
+    public CategoryResponse findById(Integer id) {
+        return repository.findById(id)
+                .map(mapper::toCategoryResponse)
+                .orElseThrow(() -> new CategoryNotFoundException("Category not found with ID: " + id));
+    }
+
+    // Mettre à jour une catégorie
+    public CategoryResponse updateCategory(Integer id, CategoryRequest request) {
+        Category existingCategory = repository.findById(id)
+                .orElseThrow(() -> new CategoryNotFoundException("Category not found with ID: " + id));
+        existingCategory.setName(request.name());
+        existingCategory.setDescription(request.description());
+        repository.save(existingCategory);
+        return mapper.toCategoryResponse(existingCategory);
+    }
+
+    // Supprimer une catégorie
+    public void deleteCategory(Integer id) {
+        if (!repository.existsById(id)) {
+            throw new CategoryNotFoundException("Category not found with ID: " + id);
+        }
+        repository.deleteById(id);
+    }
+
 }
