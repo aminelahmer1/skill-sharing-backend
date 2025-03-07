@@ -1,5 +1,5 @@
 server:
-  port: 8050 # ou 8050 pour service-skill, etc.
+  port: 8050
 
 eureka:
   client:
