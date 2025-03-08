@@ -1,4 +1,4 @@
-package com.example.serviceskill.handler;
+package com.example.serviceskill.exception;
 
 public class SkillNotFoundException extends RuntimeException {
     public SkillNotFoundException(String message) {

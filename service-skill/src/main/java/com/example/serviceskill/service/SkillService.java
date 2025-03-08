@@ -3,7 +3,8 @@ package com.example.serviceskill.service;
 import com.example.serviceskill.dto.SkillRequest;
 import com.example.serviceskill.dto.SkillResponse;
 import com.example.serviceskill.entity.Skill;
-import com.example.serviceskill.handler.SkillNotFoundException;
+import com.example.serviceskill.exception.InscriptionLimitExceededException;
+import com.example.serviceskill.exception.SkillNotFoundException;
 import com.example.serviceskill.repository.SkillRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -61,7 +62,18 @@ public class SkillService {
     public void incrementNbInscrits(Integer skillId) {
         Skill skill = repository.findById(skillId)
                 .orElseThrow(() -> new SkillNotFoundException("Skill not found with ID: " + skillId));
-        skill.setNbInscrits(skill.getNbInscrits() + 1); // Incrémenter le compteur
+
+        // Vérifier si le nombre d'inscriptions dépasse la quantité disponible
+        if (skill.getNbInscrits() >= skill.getAvailableQuantity()) {
+            throw new InscriptionLimitExceededException(
+                    "Inscription limit exceeded for skill with ID: " + skillId +
+                            ". Available quantity: " + skill.getAvailableQuantity() +
+                            ", Current inscriptions: " + skill.getNbInscrits()
+            );
+        }
+
+        // Incrémenter le compteur d'inscriptions
+        skill.setNbInscrits(skill.getNbInscrits() + 1);
         repository.save(skill);
     }
 }

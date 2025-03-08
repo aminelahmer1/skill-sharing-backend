@@ -1,4 +1,4 @@
-package com.example.serviceskill.handler;
+package com.example.serviceskill.exception;
 
 public class CategoryNotFoundException extends RuntimeException {
     public CategoryNotFoundException(String message) {

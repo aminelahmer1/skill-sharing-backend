@@ -3,7 +3,7 @@ package com.example.serviceskill.service;
 import com.example.serviceskill.dto.CategoryRequest;
 import com.example.serviceskill.dto.CategoryResponse;
 import com.example.serviceskill.entity.Category;
-import com.example.serviceskill.handler.CategoryNotFoundException;
+import com.example.serviceskill.exception.CategoryNotFoundException;
 import com.example.serviceskill.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

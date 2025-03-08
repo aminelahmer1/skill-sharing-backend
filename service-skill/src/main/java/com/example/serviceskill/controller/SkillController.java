@@ -2,9 +2,12 @@ package com.example.serviceskill.controller;
 
 import com.example.serviceskill.dto.SkillRequest;
 import com.example.serviceskill.dto.SkillResponse;
+import com.example.serviceskill.exception.InscriptionLimitExceededException;
+import com.example.serviceskill.exception.SkillNotFoundException;
 import com.example.serviceskill.service.SkillService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -58,11 +61,27 @@ public class SkillController {
     }
 
     // Incrémenter le compteur d'inscriptions
+
     @PostMapping("/{skill-id}/increment")
     public ResponseEntity<Void> incrementNbInscrits(
             @PathVariable("skill-id") Integer skillId
     ) {
         service.incrementNbInscrits(skillId);
         return ResponseEntity.noContent().build();
+    }
+
+    // Gestion des exceptions
+    @ExceptionHandler(InscriptionLimitExceededException.class)
+    public ResponseEntity<String> handleInscriptionLimitExceededException(
+            InscriptionLimitExceededException ex
+    ) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(SkillNotFoundException.class)
+    public ResponseEntity<String> handleSkillNotFoundException(
+            SkillNotFoundException ex
+    ) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
     }
 }
