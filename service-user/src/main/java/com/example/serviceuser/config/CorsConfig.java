@@ -16,7 +16,7 @@ public class CorsConfig {
                 registry.addMapping("/**") // Autoriser tous les endpoints
                         .allowedOrigins("http://localhost:4200") // Autoriser le frontend Angular
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS") // Méthodes autorisées
-                        .allowedHeaders("*") // Autoriser tous les en-têtes
+                        .allowedHeaders("Authorization", "Content-Type") // Autoriser tous les en-têtes
                         .allowCredentials(true); // Autoriser les cookies et les en-têtes d'authentification
             }
         };

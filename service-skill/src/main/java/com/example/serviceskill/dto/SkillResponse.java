@@ -11,5 +11,6 @@ public record SkillResponse(
         int nbInscrits,
         Integer categoryId,
         String categoryName,
-        String categoryDescription
+        String categoryDescription,
+        Long userId // ID de l'utilisateur (PROVIDER)
 ) {}

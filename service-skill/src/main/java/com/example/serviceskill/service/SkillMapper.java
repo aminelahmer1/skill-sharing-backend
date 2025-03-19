@@ -22,6 +22,7 @@ public class SkillMapper {
                                 .id(request.categoryId())
                                 .build()
                 )
+                .userId(request.userId())
                 .build();
     }
 
@@ -35,7 +36,8 @@ public class SkillMapper {
                 skill.getNbInscrits(),
                 skill.getCategory().getId(),
                 skill.getCategory().getName(),
-                skill.getCategory().getDescription()
+                skill.getCategory().getDescription(),
+                skill.getUserId()
         );
     }
 }

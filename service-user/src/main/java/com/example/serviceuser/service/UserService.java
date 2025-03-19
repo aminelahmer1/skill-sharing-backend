@@ -32,6 +32,8 @@ public class UserService {
         user.setUsername(userDTO.username());
         user.setEmail(userDTO.email());
         user.setPassword(passwordEncoder.encode(userDTO.password()));
+        user.setCity(userDTO.city());
+        user.setGovernorate(userDTO.governorate());
         user.setRole(userDTO.role());
 
         userRepository.save(user);

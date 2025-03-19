@@ -2,6 +2,7 @@ package com.example.serviceskill.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.math.BigDecimal;
 
@@ -11,6 +12,7 @@ import java.math.BigDecimal;
 @Getter
 @Setter
 @Entity
+@EntityListeners(AuditingEntityListener.class)
 @Table(name = "skill", schema = "public") // Nom de la table et schéma
 public class Skill {
     @Id
@@ -35,4 +37,6 @@ public class Skill {
     @ManyToOne
     @JoinColumn(name = "category_id", nullable = false)
     private Category category;
+    @Column(name = "user_id", nullable = false)
+    private Long userId; // ID de l'utilisateur (PROVIDER)
 }

@@ -16,5 +16,7 @@ public record SkillRequest(
         @Positive(message = "Price should be positive")
         BigDecimal price,
         @NotNull(message = "Skill category is required")
-        Integer categoryId
+        Integer categoryId,
+        @NotNull(message = "User ID is required")
+        Long userId // ID de l'utilisateur (PROVIDER)
 ) {}

@@ -1,11 +1,17 @@
 package com.example.serviceskill.service;
 
+import com.example.serviceskill.controller.UserServiceClient;
 import com.example.serviceskill.dto.SkillRequest;
 import com.example.serviceskill.dto.SkillResponse;
+import com.example.serviceskill.dto.UserResponse;
+import com.example.serviceskill.entity.Category;
 import com.example.serviceskill.entity.Skill;
+import com.example.serviceskill.exception.CategoryNotFoundException;
 import com.example.serviceskill.exception.InscriptionLimitExceededException;
 import com.example.serviceskill.exception.SkillNotFoundException;
+import com.example.serviceskill.repository.CategoryRepository;
 import com.example.serviceskill.repository.SkillRepository;
+
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -16,15 +22,36 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class SkillService {
-
+private  final CategoryRepository categoryRepository;
     private final SkillRepository repository;
     private final SkillMapper mapper;
-
+    private final UserServiceClient userServiceClient;
     public Integer createSkill(SkillRequest request) {
-        Skill skill = mapper.toSkill(request);
-        skill.setNbInscrits(0); // Initialiser le compteur à 0
+        // Récupérer les informations de l'utilisateur via Feign
+        UserResponse user = userServiceClient.getUserById(request.userId());
+
+        // Vérifier que l'utilisateur est un PROVIDER
+        if (!user.role().equals("PROVIDER")) {
+            throw new RuntimeException("Only users with PROVIDER role can create skills");
+        }
+
+        // Créer la compétence
+        Category category = categoryRepository.findById(request.categoryId())
+                .orElseThrow(() -> new CategoryNotFoundException("Category not found"));
+
+        Skill skill = Skill.builder()
+                .name(request.name())
+                .description(request.description())
+                .availableQuantity(request.availableQuantity())
+                .price(request.price())
+                .nbInscrits(0)
+                .category(category)
+
+                .build();
+
         return repository.save(skill).getId();
     }
+
 
     public SkillResponse findById(Integer id) {
         return repository.findById(id)
