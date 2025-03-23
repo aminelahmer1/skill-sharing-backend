@@ -10,8 +10,8 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 @Slf4j
 @Component
-public class FeignClientInterceptor implements RequestInterceptor {
-
+public class FeignClientInterceptor  {
+/*
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
 
@@ -31,4 +31,5 @@ public class FeignClientInterceptor implements RequestInterceptor {
             log.warn("RequestContextHolder is null. Cannot retrieve the token.");
         }
     }
+*/
 }

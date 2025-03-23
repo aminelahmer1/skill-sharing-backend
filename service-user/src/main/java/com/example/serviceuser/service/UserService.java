@@ -1,73 +1,73 @@
 package com.example.serviceuser.service;
 
-import com.example.serviceuser.config.JwtUtil;
-import com.example.serviceuser.dto.UserDTO;
+import com.example.serviceuser.dto.UserRequest;
+import com.example.serviceuser.dto.UserResponse;
 import com.example.serviceuser.entity.User;
+import com.example.serviceuser.exception.UserNotFoundException;
+
 import com.example.serviceuser.repository.UserRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang.StringUtils;
 import org.springframework.stereotype.Service;
 
-import java.util.Optional;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class UserService {
 
-    @Autowired
-    private UserRepository userRepository;
+    private final UserRepository userRepository;
+    private final UserMapper userMapper;
 
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
-    private JwtUtil jwtUtil;
-
-    // Méthode pour enregistrer un utilisateur
-    public String registerUser(UserDTO userDTO) {
-        if (userRepository.findByEmail(userDTO.email()) != null) {
-            throw new RuntimeException("Email already in use!");
-        }
-
-        User user = new User();
-        user.setUsername(userDTO.username());
-        user.setEmail(userDTO.email());
-        user.setPassword(passwordEncoder.encode(userDTO.password()));
-        user.setCity(userDTO.city());
-        user.setGovernorate(userDTO.governorate());
-        user.setRole(userDTO.role());
-
+    public String createUser(UserRequest request) {
+        User user = userMapper.toUser(request);
         userRepository.save(user);
-        return "User registered successfully!";
+        return user.getId().toString();
     }
 
-    // Recherche un utilisateur par username
-    public Optional<User> findByUsername(String username) {
-        return Optional.ofNullable(userRepository.findByUsername(username));
+    public void updateUser(UserRequest request) {
+        User user = userRepository.findById(request.id())
+                .orElseThrow(() -> new UserNotFoundException(
+                        String.format("Cannot update user: No user found with the provided ID: %s", request.id())
+                ));
+        mergeUser(user, request);
+        userRepository.save(user);
     }
 
-    // Recherche un utilisateur par email
-    public Optional<User> findByEmail(String email) {
-        return Optional.ofNullable(userRepository.findByEmail(email));
-    }
-
-    // Connexion d'un utilisateur
-    public String loginUser(String email, String password) {
-        User user = userRepository.findByEmail(email);
-
-        if (user == null) {
-            throw new RuntimeException("User not found!");
+    private void mergeUser(User user, UserRequest request) {
+        if (StringUtils.isNotBlank(request.username())) {
+            user.setUsername(request.username());
         }
-
-        if (!passwordEncoder.matches(password, user.getPassword())) {
-            throw new RuntimeException("Invalid password!");
+        if (StringUtils.isNotBlank(request.email())) {
+            user.setEmail(request.email());
         }
-
-        // Générer un token JWT
-        return jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+        if (StringUtils.isNotBlank(request.city())) {
+            user.setCity(request.city());
+        }
+        if (StringUtils.isNotBlank(request.governorate())) {
+            user.setGovernorate(request.governorate());
+        }
     }
 
-    // Déconnexion
-    public void logout(String token) {
-        jwtUtil.invalidateToken(token);
+    public List<UserResponse> findAllUsers() {
+        return userRepository.findAll()
+                .stream()
+                .map(userMapper::fromUser)
+                .collect(Collectors.toList());
+    }
+
+    public UserResponse findById(Long id) {
+        return userRepository.findById(id)
+                .map(userMapper::fromUser)
+                .orElseThrow(() -> new UserNotFoundException(String.format("No user found with the provided ID: %s", id)));
+    }
+
+    public boolean existsById(Long id) {
+        return userRepository.findById(id).isPresent();
+    }
+
+    public void deleteUser(Long id) {
+        userRepository.deleteById(id);
     }
 }

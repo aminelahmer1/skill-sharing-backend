@@ -17,4 +17,10 @@ spring:
     show-sql: true
 application:
     config:
-      User-url: http://localhost:8081/users
+      User-url: http://localhost:8822/api/v1/users
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 5000

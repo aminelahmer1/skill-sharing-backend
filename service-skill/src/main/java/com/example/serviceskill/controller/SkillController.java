@@ -9,13 +9,13 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
+/*import org.springframework.security.access.prepost.PreAuthorize;*/
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
-@RequestMapping("/skills")
+@RequestMapping("/api/v1/skills")
 @RequiredArgsConstructor
 public class SkillController {
 
@@ -85,5 +85,16 @@ public class SkillController {
             SkillNotFoundException ex
     ) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<List<SkillResponse>> searchSkills(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) Integer categoryId,
+            @RequestParam(required = false) Double minPrice,
+            @RequestParam(required = false) Double maxPrice
+    ) {
+        return ResponseEntity.ok(service.searchSkills(keyword, city, categoryId, minPrice, maxPrice));
     }
 }

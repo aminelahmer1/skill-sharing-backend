@@ -1,45 +1,51 @@
 package com.example.serviceuser.controller;
 
-import com.example.serviceuser.entity.User;
-import com.example.serviceuser.entity.Role;
-import com.example.serviceuser.repository.UserRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import com.example.serviceuser.dto.UserRequest;
+import com.example.serviceuser.dto.UserResponse;
+import com.example.serviceuser.service.UserService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
 
 @RestController
-@RequestMapping("/users")
-@CrossOrigin(origins = "http://localhost:4200", allowedHeaders = "*", allowCredentials = "true")
+@RequestMapping("/api/v1/users")
+@RequiredArgsConstructor
 public class UserController {
 
-    @Autowired
-    private UserRepository userRepository;
-/*
-    @GetMapping("/profile")
-    public Map<String, Object> getProfile() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        String email = authentication.getName(); // Récupère l'email de l'utilisateur connecté
-        User user = userRepository.findByEmail(email); // Récupère l'utilisateur par email
+    private final UserService userService;
 
-        Map<String, Object> profile = new HashMap<>();
-        profile.put("username", user.getUsername());
-        profile.put("email", user.getEmail());
-        profile.put("role", user.getRole()); // Ajoutez le rôle de l'utilisateur
+    @PostMapping
+    public ResponseEntity<String> createUser(@RequestBody @Valid UserRequest request) {
+        return ResponseEntity.ok(userService.createUser(request));
+    }
 
-        // Ajoutez des informations spécifiques en fonction du rôle
-        if (user.getRole() == Role.ROLE_PROVIDER) {
-            profile.put("skills", user.getProvidedSkills()); // Exemple : compétences fournies
-        } else if (user.getRole() == Role.ROLE_RECEIVER) {
-            profile.put("skillsNeeded", user.getNeededSkills()); // Exemple : compétences recherchées
-        }
+    @PutMapping
+    public ResponseEntity<Void> updateUser(@RequestBody @Valid UserRequest request) {
+        userService.updateUser(request);
+        return ResponseEntity.accepted().build();
+    }
 
-        return profile;
-    }*/
+    @GetMapping
+    public ResponseEntity<List<UserResponse>> findAll() {
+        return ResponseEntity.ok(userService.findAllUsers());
+    }
+
+    @GetMapping("/exists/{user-id}")
+    public ResponseEntity<Boolean> existsById(@PathVariable("user-id") Long userId) {
+        return ResponseEntity.ok(userService.existsById(userId));
+    }
+
+    @GetMapping("/{user-id}")
+    public ResponseEntity<UserResponse> findById(@PathVariable("user-id") Long userId) {
+        return ResponseEntity.ok(userService.findById(userId));
+    }
+
+    @DeleteMapping("/{user-id}")
+    public ResponseEntity<Void> delete(@PathVariable("user-id") Long userId) {
+        userService.deleteUser(userId);
+        return ResponseEntity.accepted().build();
+    }
 }

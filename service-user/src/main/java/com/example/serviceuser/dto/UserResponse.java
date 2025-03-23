@@ -4,5 +4,7 @@ public record UserResponse(
         Long id,
         String username,
         String email,
-        String role
+        String city,
+        String governorate,
+        com.example.serviceuser.entity.Role role
 ) {}

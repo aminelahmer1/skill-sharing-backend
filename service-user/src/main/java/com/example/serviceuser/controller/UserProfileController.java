@@ -24,7 +24,10 @@ public class UserProfileController {
                 user.getId(),
                 user.getUsername(),
                 user.getEmail(),
-                user.getRole().name()
+
+                user.getGovernorate(),
+                user.getCity(),
+                user.getRole()
         );
 
         return ResponseEntity.ok(response);

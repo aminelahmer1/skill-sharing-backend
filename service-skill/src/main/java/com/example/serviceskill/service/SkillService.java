@@ -31,14 +31,15 @@ private  final CategoryRepository categoryRepository;
         UserResponse user = userServiceClient.getUserById(request.userId());
 
         // Vérifier que l'utilisateur est un PROVIDER
-        if (!user.role().equals("PROVIDER")) {
+        if (!user.role().equals("ROLE_PROVIDER")) {
             throw new RuntimeException("Only users with PROVIDER role can create skills");
         }
 
-        // Créer la compétence
+        // Vérifier que la catégorie existe
         Category category = categoryRepository.findById(request.categoryId())
                 .orElseThrow(() -> new CategoryNotFoundException("Category not found"));
 
+        // Créer la compétence
         Skill skill = Skill.builder()
                 .name(request.name())
                 .description(request.description())
@@ -46,12 +47,11 @@ private  final CategoryRepository categoryRepository;
                 .price(request.price())
                 .nbInscrits(0)
                 .category(category)
-
+                .userId(request.userId())
                 .build();
 
         return repository.save(skill).getId();
     }
-
 
     public SkillResponse findById(Integer id) {
         return repository.findById(id)
@@ -102,6 +102,33 @@ private  final CategoryRepository categoryRepository;
         // Incrémenter le compteur d'inscriptions
         skill.setNbInscrits(skill.getNbInscrits() + 1);
         repository.save(skill);
+    }
+    public List<SkillResponse> searchSkills(
+            String keyword,  // Mot-clé pour le nom ou la description
+            String city,     // Ville
+            Integer categoryId,  // ID de la catégorie
+            Double minPrice,  // Prix minimum
+            Double maxPrice   // Prix maximum
+    ) {
+        return repository.findByKeywordAndFilters(keyword, categoryId, minPrice, maxPrice)
+                .stream()
+                .map(this::toSkillResponse)
+                .collect(Collectors.toList());
+    }
+
+    private SkillResponse toSkillResponse(Skill skill) {
+        return new SkillResponse(
+                skill.getId(),
+                skill.getName(),
+                skill.getDescription(),
+                skill.getAvailableQuantity(),
+                skill.getPrice(),
+                skill.getNbInscrits(),
+                skill.getCategory().getId(),
+                skill.getCategory().getName(),
+                skill.getCategory().getDescription(),
+                skill.getUserId()
+        );
     }
 }
 

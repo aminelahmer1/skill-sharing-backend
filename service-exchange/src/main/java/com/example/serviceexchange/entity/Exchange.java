@@ -1,32 +1,38 @@
 package com.example.serviceexchange.entity;
 
-
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.*;
 
 import java.time.LocalDateTime;
 
 @Entity
-@Data
-@Table(name = "exchange", schema = "public")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Table(name = "exchange")
 public class Exchange {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private Integer id;
+
+    @Column(name = "provider_id", nullable = false)
+    private Long providerId; // ID du Provider
+
+    @Column(name = "receiver_id", nullable = false)
+    private Long receiverId; // ID du Receiver
+
+    @Column(name = "skill_id", nullable = false)
+    private Integer skillId; // ID de la compétence échangée
 
     @Column(nullable = false)
-    private Long providerId; // ID de l'utilisateur qui propose la compétence
+    private String status; // Statut de l'échange (PENDING, ACCEPTED, REJECTED, COMPLETED)
 
-    @Column(nullable = false)
-    private Long receiverId; // ID de l'utilisateur qui reçoit la compétence
+    @Column(name = "created_at", nullable = false)
+    private LocalDateTime createdAt; // Date de création de l'échange
 
-    @Column(nullable = false)
-    private Long skillId; // ID de la compétence échangée
-
-    @Column(nullable = false)
-    private LocalDateTime exchangeDate; // Date de l'échange
-
-    @Enumerated(EnumType.STRING) // Stocke le statut sous forme de chaîne de caractères dans la base de données
-    @Column(nullable = false)
-    private ExchangeStatus status; // Statut de l'échange (PENDING, ACCEPTED, COMPLETED, CANCELLED)
+    @Column(name = "provider_rating")
+    private Integer providerRating; // Note donnée par le Receiver au Provider
 }

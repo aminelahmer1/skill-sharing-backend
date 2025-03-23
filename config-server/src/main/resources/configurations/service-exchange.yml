@@ -16,3 +16,7 @@
       hibernate:
         ddl-auto: update
       show-sql: true
+  application:
+    config:
+      user-url: http://localhost:8822/api/v1/users
+      skill-url: http://localhost:8822/api/v1/skills
