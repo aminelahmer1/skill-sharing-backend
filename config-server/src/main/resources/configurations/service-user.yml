@@ -5,12 +5,34 @@ spring:
     url: jdbc:postgresql://localhost:5432/SkillSharing_User
     username: postgres
     password: admin
+    driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
       ddl-auto: update
     show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+      format_sql: true # Formats the SQL output for better readability
+    logging.level:
+      org.hibernate.SQL: DEBUG # Logs Hibernate SQL queries
+      org.hibernate.type.descriptor.sql.BasicBinder: TRACE # Logs parameter binding
 
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9098/realms/skill-sharing
+          jwk-set-uri: http://localhost:9098/realms/skill-sharing/protocol/openid-connect/certs
 
+keycloak:
+  auth-server-url: http://localhost:9098
+  realm: skill-sharing
+  client-id: gateway-service
+  client-secret: oLdwxIS2DaNSeELasubWHBTCRUEIvpEF
+  admin-client-id: admin-cli
+  admin-username: admin
+  admin-password: admin
 
 server:
-  port: 8222
+  port: 8081

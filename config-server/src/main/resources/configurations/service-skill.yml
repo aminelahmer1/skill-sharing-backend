@@ -15,9 +15,18 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9098/realms/skill-sharing
+          jwk-set-uri: http://localhost:9098/realms/skill-sharing/protocol/openid-connect/certs
+keycloak:
+  auth-server-url: http://localhost:9098
+  realm: skill-sharing
 application:
-    config:
-      User-url: http://localhost:8822/api/v1/users
+  config:
+    User-url: http://localhost:8822/api/v1/users
 feign:
   client:
     config:

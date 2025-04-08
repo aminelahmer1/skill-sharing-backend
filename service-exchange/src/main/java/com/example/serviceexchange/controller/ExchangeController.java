@@ -6,6 +6,9 @@ import com.example.serviceexchange.service.ExchangeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -17,35 +20,39 @@ public class ExchangeController {
 
     private final ExchangeService exchangeService;
 
-    // Créer un échange
     @PostMapping
-    public ResponseEntity<ExchangeResponse> createExchange(@RequestBody @Valid ExchangeRequest request) {
-        return ResponseEntity.ok(exchangeService.createExchange(request));
-    }
-
-    // Mettre à jour le statut d'un échange
-    @PutMapping("/{exchange-id}/status")
-    public ResponseEntity<ExchangeResponse> updateExchangeStatus(
-            @PathVariable("exchange-id") Integer exchangeId,
-            @RequestParam String status
+    @PreAuthorize("hasRole('RECEIVER')")
+    public ResponseEntity<ExchangeResponse> createExchange(
+            @RequestBody @Valid ExchangeRequest request,
+            @AuthenticationPrincipal Jwt jwt
     ) {
-        return ResponseEntity.ok(exchangeService.updateExchangeStatus(exchangeId, status));
+        return ResponseEntity.ok(exchangeService.createExchange(request, jwt));
     }
 
-    // Noter un échange (seulement providerRating)
-    @PutMapping("/{exchange-id}/rate")
+    @PutMapping("/{id}/status")
+    @PreAuthorize("@exchangeValidator.isExchangeParticipant(#id, #jwt)")
+    public ResponseEntity<ExchangeResponse> updateStatus(
+            @PathVariable Integer id,
+            @RequestParam String status,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        return ResponseEntity.ok(exchangeService.updateStatus(id, status, jwt));
+    }
+
+    @PutMapping("/{id}/rate")
+    @PreAuthorize("@exchangeValidator.isReceiver(#id, #jwt)")
     public ResponseEntity<ExchangeResponse> rateExchange(
-            @PathVariable("exchange-id") Integer exchangeId,
-            @RequestParam Integer providerRating
+            @PathVariable Integer id,
+            @RequestParam Integer rating,
+            @AuthenticationPrincipal Jwt jwt
     ) {
-        return ResponseEntity.ok(exchangeService.rateExchange(exchangeId, providerRating));
+        return ResponseEntity.ok(exchangeService.rateExchange(id, rating, jwt));
     }
 
-    // Récupérer tous les échanges d'un utilisateur
-    @GetMapping("/user/{user-id}")
-    public ResponseEntity<List<ExchangeResponse>> getExchangesByUserId(
-            @PathVariable("user-id") Long userId
+    @GetMapping("/user/me")
+    public ResponseEntity<List<ExchangeResponse>> getUserExchanges(
+            @AuthenticationPrincipal Jwt jwt
     ) {
-        return ResponseEntity.ok(exchangeService.getExchangesByUserId(userId));
+        return ResponseEntity.ok(exchangeService.getUserExchanges(jwt));
     }
 }

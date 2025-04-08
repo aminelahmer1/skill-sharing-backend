@@ -1,15 +1,13 @@
 package com.example.serviceskill.controller;
-
 import com.example.serviceskill.dto.SkillRequest;
 import com.example.serviceskill.dto.SkillResponse;
-import com.example.serviceskill.exception.InscriptionLimitExceededException;
-import com.example.serviceskill.exception.SkillNotFoundException;
 import com.example.serviceskill.service.SkillService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-/*import org.springframework.security.access.prepost.PreAuthorize;*/
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,82 +17,54 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SkillController {
 
-    private final SkillService service;
+    private final SkillService skillService;
 
-    // Créer une compétence
-    @PostMapping("/create")
-
+    @PostMapping
+    @PreAuthorize("hasRole('PROVIDER')")
     public ResponseEntity<Integer> createSkill(
-            @RequestBody @Valid SkillRequest request
+            @RequestBody @Valid SkillRequest request,
+            @AuthenticationPrincipal Jwt jwt
     ) {
-        return ResponseEntity.ok(service.createSkill(request));
+        return ResponseEntity.ok(skillService.createSkill(request, jwt));
     }
 
-    // Récupérer une compétence par ID
-    @GetMapping("/{skill-id}")
-    public ResponseEntity<SkillResponse> getSkillById(
-            @PathVariable("skill-id") Integer skillId
-    ) {
-        return ResponseEntity.ok(service.findById(skillId));
+    @GetMapping("/{id}")
+    public ResponseEntity<SkillResponse> getSkill(@PathVariable Integer id) {
+        return ResponseEntity.ok(skillService.findById(id));
     }
 
-    // Récupérer toutes les compétences
-    @GetMapping("/all")
+    @GetMapping
     public ResponseEntity<List<SkillResponse>> getAllSkills() {
-        return ResponseEntity.ok(service.findAll());
+        return ResponseEntity.ok(skillService.findAll());
     }
 
-    // Mettre à jour une compétence
-    @PutMapping("/update/{skill-id}")
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('PROVIDER')")
     public ResponseEntity<SkillResponse> updateSkill(
-            @PathVariable("skill-id") Integer skillId,
-            @RequestBody @Valid SkillRequest request
+            @PathVariable Integer id,
+            @RequestBody @Valid SkillRequest request,
+            @AuthenticationPrincipal Jwt jwt
     ) {
-        return ResponseEntity.ok(service.updateSkill(skillId, request));
+        return ResponseEntity.ok(skillService.updateSkill(id, request, jwt));
     }
 
-    // Supprimer une compétence
-    @DeleteMapping("/delete/{skill-id}")
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('PROVIDER')")
     public ResponseEntity<Void> deleteSkill(
-            @PathVariable("skill-id") Integer skillId
+            @PathVariable Integer id,
+            @AuthenticationPrincipal Jwt jwt
     ) {
-        service.deleteSkill(skillId);
+        skillService.deleteSkill(id, jwt);
         return ResponseEntity.noContent().build();
     }
 
-    // Incrémenter le compteur d'inscriptions
-
-    @PostMapping("/{skill-id}/increment")
-    public ResponseEntity<Void> incrementNbInscrits(
-            @PathVariable("skill-id") Integer skillId
+    @PostMapping("/{id}/register")
+    @PreAuthorize("hasRole('RECEIVER')")
+    public ResponseEntity<Void> registerForSkill(
+            @PathVariable Integer id,
+            @AuthenticationPrincipal Jwt jwt
     ) {
-        service.incrementNbInscrits(skillId);
+        skillService.registerForSkill(id, jwt);
         return ResponseEntity.noContent().build();
-    }
-
-    // Gestion des exceptions
-    @ExceptionHandler(InscriptionLimitExceededException.class)
-    public ResponseEntity<String> handleInscriptionLimitExceededException(
-            InscriptionLimitExceededException ex
-    ) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
-    }
-
-    @ExceptionHandler(SkillNotFoundException.class)
-    public ResponseEntity<String> handleSkillNotFoundException(
-            SkillNotFoundException ex
-    ) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
-    }
-
-    @GetMapping("/search")
-    public ResponseEntity<List<SkillResponse>> searchSkills(
-            @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) String city,
-            @RequestParam(required = false) Integer categoryId,
-            @RequestParam(required = false) Double minPrice,
-            @RequestParam(required = false) Double maxPrice
-    ) {
-        return ResponseEntity.ok(service.searchSkills(keyword, city, categoryId, minPrice, maxPrice));
     }
 }

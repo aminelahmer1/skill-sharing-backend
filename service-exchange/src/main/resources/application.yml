@@ -3,3 +3,6 @@ spring:
     import: optional:configserver:http://localhost:8888
   application:
     name: service-exchange
+  main:
+    allow-bean-definition-overriding: true
+

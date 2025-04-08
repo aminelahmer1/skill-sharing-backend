@@ -1,73 +1,88 @@
 package com.example.serviceuser.service;
 
-import com.example.serviceuser.dto.UserRequest;
+import com.example.serviceuser.configuration.KeycloakAdminService;
 import com.example.serviceuser.dto.UserResponse;
 import com.example.serviceuser.entity.User;
 import com.example.serviceuser.exception.UserNotFoundException;
-
 import com.example.serviceuser.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.apache.commons.lang.StringUtils;
+import lombok.extern.slf4j.Slf4j;
+import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.stream.Collectors;
-
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class UserService {
 
     private final UserRepository userRepository;
+    private final KeycloakAdminService keycloakAdminService;
     private final UserMapper userMapper;
 
-    public String createUser(UserRequest request) {
-        User user = userMapper.toUser(request);
-        userRepository.save(user);
-        return user.getId().toString();
-    }
+    /**
+     * Synchronize all users from Keycloak to the PostgreSQL database.
+     */
+    public void syncUsersWithKeycloak() {
+        log.info("Starting user synchronization with Keycloak...");
 
-    public void updateUser(UserRequest request) {
-        User user = userRepository.findById(request.id())
-                .orElseThrow(() -> new UserNotFoundException(
-                        String.format("Cannot update user: No user found with the provided ID: %s", request.id())
-                ));
-        mergeUser(user, request);
-        userRepository.save(user);
-    }
+        // Fetch all Keycloak users
+        List<UserRepresentation> keycloakUsers = keycloakAdminService.getAllUsers();
 
-    private void mergeUser(User user, UserRequest request) {
-        if (StringUtils.isNotBlank(request.username())) {
-            user.setUsername(request.username());
+        // Iterate through users and synchronize
+        for (UserRepresentation kcUser : keycloakUsers) {
+            synchronizeUser(kcUser);
         }
-        if (StringUtils.isNotBlank(request.email())) {
-            user.setEmail(request.email());
-        }
-        if (StringUtils.isNotBlank(request.city())) {
-            user.setCity(request.city());
-        }
-        if (StringUtils.isNotBlank(request.governorate())) {
-            user.setGovernorate(request.governorate());
-        }
+
+        log.info("User synchronization with Keycloak completed successfully.");
     }
 
-    public List<UserResponse> findAllUsers() {
-        return userRepository.findAll()
-                .stream()
-                .map(userMapper::fromUser)
-                .collect(Collectors.toList());
+    /**
+     * Synchronize a single Keycloak user with the database.
+     *
+     * @param kcUser User representation from Keycloak.
+     */
+    private void synchronizeUser(UserRepresentation kcUser) {
+        log.info("Synchronizing Keycloak user with ID: {}", kcUser.getId());
+
+        userRepository.findByKeycloakId(kcUser.getId())
+                .ifPresentOrElse(
+                        existingUser -> {
+                            log.info("Updating existing user: {}", existingUser.getKeycloakId());
+                            userMapper.updateFromKeycloak(existingUser, kcUser);
+                            userRepository.save(existingUser);
+                        },
+                        () -> {
+                            log.info("Creating new user with Keycloak ID: {}", kcUser.getId());
+                            User newUser = new User();
+                            userMapper.updateFromKeycloak(newUser, kcUser);
+                            newUser.setKeycloakId(kcUser.getId());
+                            userRepository.save(newUser);
+                        }
+                );
     }
 
-    public UserResponse findById(Long id) {
-        return userRepository.findById(id)
-                .map(userMapper::fromUser)
-                .orElseThrow(() -> new UserNotFoundException(String.format("No user found with the provided ID: %s", id)));
+    /**
+     * Find a user by their Keycloak ID and map it to UserResponse.
+     *
+     * @param keycloakId The Keycloak ID of the user.
+     * @return UserResponse containing user details.
+     */
+    public UserResponse findByKeycloakId(String keycloakId) {
+        return userRepository.findByKeycloakId(keycloakId)
+                .map(userMapper::toResponse)
+                .orElseThrow(() -> new UserNotFoundException("User not found with Keycloak ID: " + keycloakId));
     }
 
-    public boolean existsById(Long id) {
-        return userRepository.findById(id).isPresent();
-    }
-
-    public void deleteUser(Long id) {
-        userRepository.deleteById(id);
+    /**
+     * Find a user by their internal database ID.
+     *
+     * @param userId The ID of the user in the database.
+     * @return UserResponse containing user details.
+     */
+    public UserResponse findById(Long userId) {
+        return userRepository.findById(userId)
+                .map(userMapper::toResponse)
+                .orElseThrow(() -> new UserNotFoundException("User not found with ID: " + userId));
     }
 }

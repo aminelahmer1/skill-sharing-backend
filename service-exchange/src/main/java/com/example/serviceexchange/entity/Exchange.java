@@ -2,7 +2,8 @@ package com.example.serviceexchange.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-
+import org.hibernate.annotations.CreationTimestamp;
+import com.example.serviceexchange.exception.InvalidStatusException;
 import java.time.LocalDateTime;
 
 @Entity
@@ -11,7 +12,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@Table(name = "exchange")
+@Table(name = "exchanges")
 public class Exchange {
 
     @Id
@@ -19,20 +20,28 @@ public class Exchange {
     private Integer id;
 
     @Column(name = "provider_id", nullable = false)
-    private Long providerId; // ID du Provider
+    private Long providerId;
 
     @Column(name = "receiver_id", nullable = false)
-    private Long receiverId; // ID du Receiver
+    private Long receiverId;
 
     @Column(name = "skill_id", nullable = false)
-    private Integer skillId; // ID de la compétence échangée
+    private Integer skillId;
 
-    @Column(nullable = false)
-    private String status; // Statut de l'échange (PENDING, ACCEPTED, REJECTED, COMPLETED)
-
-    @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt; // Date de création de l'échange
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
 
     @Column(name = "provider_rating")
-    private Integer providerRating; // Note donnée par le Receiver au Provider
+    private Integer providerRating;
+
+    @Column(nullable = false)
+    private String status;
+
+    public void setStatus(String status) {
+        if (!ExchangeStatus.isValid(status)) {
+            throw new InvalidStatusException("Invalid status: " + status);
+        }
+        this.status = status;
+    }
 }

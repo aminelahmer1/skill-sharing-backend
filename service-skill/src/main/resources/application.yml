@@ -3,6 +3,6 @@ spring:
     import: optional:configserver:http://localhost:8888
   application:
     name: service-skill
-application:
-  config:
-    User-url: http://localhost:8081/users
+  main:
+    allow-bean-definition-overriding: true
+

@@ -1,24 +1,45 @@
-server:
-  port: 8822
-
 spring:
   cloud:
     gateway:
       discovery:
         locator:
-          enabled: true  # Activation de la découverte dynamique des services via Eureka
+          enabled: true
       routes:
         - id: service-user
           uri: lb://SERVICE-USER
           predicates:
             - Path=/api/v1/users/**
+          filters:
+            - TokenRelay
+
 
         - id: service-skill
-          uri: lb://SERVICE-SKILL  #  pour le load balancing
+          uri: lb://SERVICE-SKILL
           predicates:
-            - Path=/api/v1/categories/**,/api/v1/skills/**
+            - Path=/api/v1/skills/**,/api/v1/categories/**
+          filters:
+            - TokenRelay
+
 
         - id: service-exchange
           uri: lb://SERVICE-EXCHANGE
           predicates:
             - Path=/api/v1/exchanges/**
+          filters:
+            - TokenRelay
+
+        - id: keycloak-auth
+          uri: http://localhost:9098
+          predicates:
+            - Path=/auth/**
+          filters:
+            - RewritePath=/auth/(?<segment>.*), /realms/skill-sharing/${segment}
+
+keycloak:
+  auth-server-url: http://localhost:9098
+  realm: skill-sharing
+  client-id: gateway-service
+  client-secret: oLdwxIS2DaNSeELasubWHBTCRUEIvpEF
+
+server:
+  port: 8822

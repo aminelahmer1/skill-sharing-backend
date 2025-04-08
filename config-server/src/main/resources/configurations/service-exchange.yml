@@ -1,22 +1,28 @@
-
-  server:
-    port: 8084
-
-  eureka:
-    client:
-      service-url:
-        defaultZone: http://localhost:8761/eureka/
-
-  spring:
-    datasource:
-      url: jdbc:postgresql://localhost:5432/SkillSharing_Exchange
-      username: postgres
-      password: admin
-    jpa:
-      hibernate:
+server:
+  port: 8084
+eureka:
+  client:
+    service-url:
+       defaultZone: http://localhost:8761/eureka/
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/SkillSharing_Exchange
+    username: postgres
+    password: admin
+  jpa:
+     hibernate:
         ddl-auto: update
-      show-sql: true
-  application:
-    config:
-      user-url: http://localhost:8822/api/v1/users
-      skill-url: http://localhost:8822/api/v1/skills
+     show-sql: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9098/realms/skill-sharing
+          jwk-set-uri: http://localhost:9098/realms/skill-sharing/protocol/openid-connect/certs
+keycloak:
+  auth-server-url: http://localhost:9098
+  realm: skill-sharing
+application:
+  config:
+    user-url: http://localhost:8822/api/v1/users
+    skill-url: http://localhost:8822/api/v1/skills

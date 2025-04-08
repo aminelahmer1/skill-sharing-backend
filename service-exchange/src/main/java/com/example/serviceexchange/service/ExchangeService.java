@@ -1,20 +1,21 @@
 package com.example.serviceexchange.service;
+
 import com.example.serviceexchange.FeignClient.SkillServiceClient;
 import com.example.serviceexchange.FeignClient.UserServiceClient;
-
 import com.example.serviceexchange.dto.ExchangeRequest;
 import com.example.serviceexchange.dto.ExchangeResponse;
-import com.example.serviceexchange.dto.UserResponse;
+import com.example.serviceexchange.dto.SkillResponse;
 import com.example.serviceexchange.entity.Exchange;
+import com.example.serviceexchange.entity.ExchangeStatus;
 import com.example.serviceexchange.exception.ExchangeNotFoundException;
 import com.example.serviceexchange.repository.ExchangeRepository;
-import feign.FeignException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -23,75 +24,59 @@ public class ExchangeService {
     private final ExchangeRepository exchangeRepository;
     private final UserServiceClient userServiceClient;
     private final SkillServiceClient skillServiceClient;
+    private final ExchangeValidator exchangeValidator;
 
-    // Créer un échange
-    public ExchangeResponse createExchange(ExchangeRequest request) {
-        // Récupérer le Provider
-        UserResponse provider = userServiceClient.getUserById(request.providerId());
-        if (!provider.role().equals("ROLE_PROVIDER")) {
-            throw new RuntimeException("Provider ID must belong to a user with ROLE_PROVIDER");
-        }
+    @Transactional
+    public ExchangeResponse createExchange(ExchangeRequest request, Jwt jwt) {
+        exchangeValidator.validateExchangeCreation(request, jwt);
 
-        // Récupérer le Receiver
-        UserResponse receiver = userServiceClient.getUserById(request.receiverId());
-        if (!receiver.role().equals("ROLE_RECEIVER")) {
-            throw new RuntimeException("Receiver ID must belong to a user with ROLE_RECEIVER");
-        }
+        SkillResponse skill = skillServiceClient.getSkillById(request.skillId());
+        exchangeValidator.validateSkill(skill, request.providerId());
 
-        // Vérifier que le Provider et le Receiver ne sont pas la même personne
-        if (request.providerId().equals(request.receiverId())) {
-            throw new RuntimeException("Provider and Receiver cannot be the same user");
-        }
-
-        // Vérifier que la compétence existe
-        skillServiceClient.getSkillById(request.skillId());
-
-        // Créer l'échange
         Exchange exchange = Exchange.builder()
                 .providerId(request.providerId())
                 .receiverId(request.receiverId())
                 .skillId(request.skillId())
-                .status("PENDING")
+                .status(ExchangeStatus.PENDING)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        exchange = exchangeRepository.save(exchange);
-        return toExchangeResponse(exchange);
+        return toResponse(exchangeRepository.save(exchange));
     }
 
+    @Transactional
+    public ExchangeResponse updateStatus(Integer exchangeId, String newStatus, Jwt jwt) {
+        Exchange exchange = getExchangeById(exchangeId);
+        exchangeValidator.validateStatusUpdate(exchange, newStatus, jwt);
 
-
-    // Mettre à jour le statut d'un échange
-    public ExchangeResponse updateExchangeStatus(Integer exchangeId, String status) {
-        Exchange exchange = exchangeRepository.findById(exchangeId)
-                .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found with ID: " + exchangeId));
-
-        exchange.setStatus(status);
-        exchange = exchangeRepository.save(exchange);
-        return toExchangeResponse(exchange);
+        exchange.setStatus(newStatus);
+        return toResponse(exchangeRepository.save(exchange));
     }
 
-    // Noter un échange (seulement providerRating)
-    public ExchangeResponse rateExchange(Integer exchangeId, Integer providerRating) {
-        Exchange exchange = exchangeRepository.findById(exchangeId)
-                .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found with ID: " + exchangeId));
+    @Transactional
+    public ExchangeResponse rateExchange(Integer exchangeId, Integer rating, Jwt jwt) {
+        Exchange exchange = getExchangeById(exchangeId);
+        exchangeValidator.validateRating(exchange, rating, jwt);
 
-        exchange.setProviderRating(providerRating);
-        exchange = exchangeRepository.save(exchange);
-        return toExchangeResponse(exchange);
+        exchange.setProviderRating(rating);
+        exchange.setStatus(ExchangeStatus.COMPLETED);
+        return toResponse(exchangeRepository.save(exchange));
     }
 
-    // Récupérer tous les échanges d'un utilisateur
-    public List<ExchangeResponse> getExchangesByUserId(Long userId) {
-        List<Exchange> exchanges = exchangeRepository.findByProviderId(userId);
-        exchanges.addAll(exchangeRepository.findByReceiverId(userId));
-        return exchanges.stream()
-                .map(this::toExchangeResponse)
-                .collect(Collectors.toList());
+    public List<ExchangeResponse> getUserExchanges(Jwt jwt) {
+        Long userId = Long.parseLong(jwt.getSubject());
+        return exchangeRepository.findByProviderIdOrReceiverId(userId, userId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
     }
 
-    // Mapper Exchange vers ExchangeResponse
-    private ExchangeResponse toExchangeResponse(Exchange exchange) {
+    private Exchange getExchangeById(Integer id) {
+        return exchangeRepository.findById(id)
+                .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found with id: " + id));
+    }
+
+    private ExchangeResponse toResponse(Exchange exchange) {
         return new ExchangeResponse(
                 exchange.getId(),
                 exchange.getProviderId(),

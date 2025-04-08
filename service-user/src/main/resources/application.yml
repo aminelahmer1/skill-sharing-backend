@@ -1,5 +1,17 @@
-  spring:
-    config:
-      import: optional:configserver:http://localhost:8888
-    application:
-      name: service-user
+spring:
+  config:
+    import: optional:configserver:http://localhost:8888
+  application:
+    name: service-user
+  main:
+    allow-bean-definition-overriding: true
+
+logging:
+  level:
+    org:
+      springframework:
+        security: DEBUG
+        cloud:
+          gateway: DEBUG
+      keycloak: DEBUG
+

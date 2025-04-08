@@ -2,7 +2,6 @@ package com.example.serviceskill.dto;
 
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
-
 import java.math.BigDecimal;
 
 public record SkillRequest(
@@ -12,11 +11,11 @@ public record SkillRequest(
         @NotNull(message = "Skill description is required")
         String description,
         @Positive(message = "Available quantity should be positive")
-        double availableQuantity,
+        Integer availableQuantity,
         @Positive(message = "Price should be positive")
         BigDecimal price,
         @NotNull(message = "Skill category is required")
         Integer categoryId,
         @NotNull(message = "User ID is required")
-        Long userId // ID de l'utilisateur (PROVIDER)
+        Long userId
 ) {}
