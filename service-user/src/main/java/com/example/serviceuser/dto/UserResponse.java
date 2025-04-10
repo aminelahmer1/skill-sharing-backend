@@ -13,7 +13,7 @@ public record UserResponse(
         String email,
         String firstName,
         String lastName,
-        Address address, // Modifié pour utiliser Address
+        Address address,
         List<String> roles,
         LocalDateTime createdAt,
         LocalDateTime updatedAt

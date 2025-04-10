@@ -3,9 +3,14 @@ package com.example.serviceuser.configuration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
+import org.keycloak.admin.client.resource.RoleMappingResource;
+import org.keycloak.admin.client.resource.UserResource;
+import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Service;
 
+
+import java.util.ArrayList;
 import java.util.List;
 @Service
 @RequiredArgsConstructor
@@ -28,4 +33,24 @@ public class KeycloakAdminService {
             throw new RuntimeException("Error fetching users from Keycloak", e);
         }
     }
+    public List<String> getUserRoles(String userId) {
+        List<String> roles = new ArrayList<>();
+        try {
+            // Retrieve the user resource
+            UserResource userResource = keycloak
+                    .realm("skill-sharing")
+                    .users()
+                    .get(userId);
+
+            // Fetch realm-level role mappings
+            List<RoleRepresentation> realmRoles = userResource.roles().realmLevel().listAll();
+            for (RoleRepresentation role : realmRoles) {
+                roles.add(role.getName());
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch roles for user ID: {}", userId, e);
+        }
+        return roles;
+    }
+
 }

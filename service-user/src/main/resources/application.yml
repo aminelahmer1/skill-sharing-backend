@@ -14,4 +14,11 @@ logging:
         cloud:
           gateway: DEBUG
       keycloak: DEBUG
+eureka:
+  instance:
+    lease-renewal-interval-in-seconds: 10  # Send heartbeats every 10 seconds
+    lease-expiration-duration-in-seconds: 30  # Mark instance as expired after 30 seconds if no heartbeats are received
+  client:
+    registry-fetch-interval-seconds: 10  # Fetch registry updates every 10 seconds
+
 

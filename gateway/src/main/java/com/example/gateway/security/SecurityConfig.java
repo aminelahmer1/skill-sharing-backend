@@ -5,12 +5,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.server.SecurityWebFilterChain;
+import reactor.core.publisher.Mono;
 
 @Configuration
 @EnableWebSecurity
@@ -18,10 +18,10 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     private static final String[] PUBLIC_ENDPOINTS = {
-            "/eureka/**",  // Eureka server
-            "/actuator/**",  // Health checks
-            "/api/v1/auth/**",  // Authentication endpoints
-            "/api/v1/users/sync",  // Allow public access for testing
+            "/eureka/**",
+            "/actuator/**",
+            "/api/v1/auth/**",
+            "/api/v1/users/sync",
             "/api/v1/users/*"
     };
 
@@ -30,25 +30,27 @@ public class SecurityConfig {
             "/api/v1/exchanges/**"
     };
 
-
-
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
         http
-                .csrf(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/users/sync", "/api/v1/auth/**").permitAll()  // Public endpoints
-                        .requestMatchers(PROVIDER_RECEIVER_ENDPOINTS).hasAnyRole("PROVIDER", "RECEIVER")
-                        .anyRequest().authenticated()
+                .csrf(ServerHttpSecurity.CsrfSpec::disable)
+                .authorizeExchange(exchange -> exchange
+                        .pathMatchers(PUBLIC_ENDPOINTS).permitAll()
+                        .pathMatchers(PROVIDER_RECEIVER_ENDPOINTS).hasAnyRole("PROVIDER", "RECEIVER")
+                        .anyExchange().authenticated()
                 )
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
+                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtReactiveAuthenticationConverter())));
         return http.build();
     }
 
-
-    private Converter<Jwt, AbstractAuthenticationToken> jwtAuthenticationConverter() {
-        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(new KeycloakRealmRoleConverter());
-        return converter;
+    private Converter<Jwt, Mono<AbstractAuthenticationToken>> jwtReactiveAuthenticationConverter() {
+        return jwt -> {
+            JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+            converter.setJwtGrantedAuthoritiesConverter(new KeycloakRealmRoleConverter());
+            return Mono.just(converter.convert(jwt)); // Wrap the result in a Mono
+        };
     }
+
+
+
 }

@@ -11,6 +11,8 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.stream.Collectors;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -45,11 +47,14 @@ public class UserService {
     private void synchronizeUser(UserRepresentation kcUser) {
         log.info("Synchronizing Keycloak user with ID: {}", kcUser.getId());
 
+        List<String> roles = keycloakAdminService.getUserRoles(kcUser.getId()); // Fetch roles
+
         userRepository.findByKeycloakId(kcUser.getId())
                 .ifPresentOrElse(
                         existingUser -> {
                             log.info("Updating existing user: {}", existingUser.getKeycloakId());
                             userMapper.updateFromKeycloak(existingUser, kcUser);
+                            existingUser.setRoles(roles); // Update roles
                             userRepository.save(existingUser);
                         },
                         () -> {
@@ -57,10 +62,12 @@ public class UserService {
                             User newUser = new User();
                             userMapper.updateFromKeycloak(newUser, kcUser);
                             newUser.setKeycloakId(kcUser.getId());
+                            newUser.setRoles(roles); // Add roles
                             userRepository.save(newUser);
                         }
                 );
     }
+
 
     /**
      * Find a user by their Keycloak ID and map it to UserResponse.
@@ -85,4 +92,14 @@ public class UserService {
                 .map(userMapper::toResponse)
                 .orElseThrow(() -> new UserNotFoundException("User not found with ID: " + userId));
     }
+
+
+
+    public List<UserResponse> findAllUsers() {
+        log.info("Fetching all users from the database...");
+        return userRepository.findAll().stream()
+                .map(userMapper::toResponse)
+                .collect(Collectors.toList());
+    }
+
 }

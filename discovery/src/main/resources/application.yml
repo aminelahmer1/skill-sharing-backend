@@ -3,3 +3,7 @@ spring:
     import: optional:configserver:http://localhost:8888
   application:
     name: discovery-service
+eureka:
+  server:
+    renewal-threshold-update-interval-ms: 5000  # Update renewal thresholds every 5 seconds
+    eviction-interval-timer-in-ms: 2000  # Check for expired instances every 2 seconds

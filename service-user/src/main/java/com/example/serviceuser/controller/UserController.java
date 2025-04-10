@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
@@ -28,8 +30,20 @@ public class UserController {
     /**
      * Get a user by their Keycloak ID.
      */
-    @GetMapping("/{keycloakId}")
-    public ResponseEntity<UserResponse> getUserByKeycloakId(@PathVariable String keycloakId) {
+    @GetMapping
+    public ResponseEntity<UserResponse> getUserByKeycloakId(@RequestParam(required = false) String keycloakId) {
+        if (keycloakId == null) {
+            return ResponseEntity.badRequest().build();
+        }
         return ResponseEntity.ok(userService.findByKeycloakId(keycloakId));
     }
+
+    @GetMapping("/all")
+    public ResponseEntity<List<UserResponse>> getAllUsers() {
+        log.info("Request received to fetch all users...");
+        List<UserResponse> users = userService.findAllUsers();
+        return ResponseEntity.ok(users);
+    }
+
+
 }

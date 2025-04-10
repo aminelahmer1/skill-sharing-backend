@@ -4,6 +4,7 @@ spring:
       discovery:
         locator:
           enabled: true
+
       routes:
         - id: service-user
           uri: lb://SERVICE-USER
@@ -33,7 +34,18 @@ spring:
           predicates:
             - Path=/auth/**
           filters:
-            - RewritePath=/auth/(?<segment>.*), /realms/skill-sharing/${segment}
+            - RewritePath=/auth/(?<segment>.*), /realms/skill-sharing/\${segment}
+
+  main:
+    web-application-type: reactive
+    allow-bean-definition-overriding: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9098/realms/skill-sharing
+          jwk-set-uri: http://localhost:9098/realms/skill-sharing/protocol/openid-connect/certs
+
 
 keycloak:
   auth-server-url: http://localhost:9098
