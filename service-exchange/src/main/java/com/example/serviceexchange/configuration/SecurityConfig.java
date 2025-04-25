@@ -30,7 +30,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/**").permitAll()
-                        .requestMatchers("/api/v1/exchanges/**").hasAnyRole("PROVIDER", "RECEIVER")
+                        .requestMatchers("/api/v1/exchanges/**").hasAnyRole("PRODUCER", "RECEIVER")
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2

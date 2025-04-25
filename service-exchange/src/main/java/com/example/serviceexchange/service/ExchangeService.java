@@ -31,10 +31,10 @@ public class ExchangeService {
         exchangeValidator.validateExchangeCreation(request, jwt);
 
         SkillResponse skill = skillServiceClient.getSkillById(request.skillId());
-        exchangeValidator.validateSkill(skill, request.providerId());
+        exchangeValidator.validateSkill(skill, request.producerId());
 
         Exchange exchange = Exchange.builder()
-                .providerId(request.providerId())
+                .producerId(request.producerId())
                 .receiverId(request.receiverId())
                 .skillId(request.skillId())
                 .status(ExchangeStatus.PENDING)
@@ -58,14 +58,14 @@ public class ExchangeService {
         Exchange exchange = getExchangeById(exchangeId);
         exchangeValidator.validateRating(exchange, rating, jwt);
 
-        exchange.setProviderRating(rating);
+        exchange.setProducerRating(rating);
         exchange.setStatus(ExchangeStatus.COMPLETED);
         return toResponse(exchangeRepository.save(exchange));
     }
 
     public List<ExchangeResponse> getUserExchanges(Jwt jwt) {
         Long userId = Long.parseLong(jwt.getSubject());
-        return exchangeRepository.findByProviderIdOrReceiverId(userId, userId)
+        return exchangeRepository.findByProducerIdOrReceiverId(userId, userId)
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -79,12 +79,12 @@ public class ExchangeService {
     private ExchangeResponse toResponse(Exchange exchange) {
         return new ExchangeResponse(
                 exchange.getId(),
-                exchange.getProviderId(),
+                exchange.getProducerId(),
                 exchange.getReceiverId(),
                 exchange.getSkillId(),
                 exchange.getStatus(),
                 exchange.getCreatedAt(),
-                exchange.getProviderRating()
+                exchange.getProducerRating()
         );
     }
 }

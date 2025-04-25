@@ -38,12 +38,13 @@ public class UserController {
         return ResponseEntity.ok(userService.findByKeycloakId(keycloakId));
     }
 
+    /**
+     * Get all users from the database.
+     */
     @GetMapping("/all")
     public ResponseEntity<List<UserResponse>> getAllUsers() {
         log.info("Request received to fetch all users...");
         List<UserResponse> users = userService.findAllUsers();
         return ResponseEntity.ok(users);
     }
-
-
 }

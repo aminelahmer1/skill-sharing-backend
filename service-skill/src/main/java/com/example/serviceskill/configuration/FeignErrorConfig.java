@@ -7,7 +7,6 @@ import feign.codec.ErrorDecoder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.access.AccessDeniedException;
-
 @Configuration
 public class FeignErrorConfig {
 
@@ -15,7 +14,7 @@ public class FeignErrorConfig {
     public ErrorDecoder errorDecoder() {
         return (methodKey, response) -> {
             if (response.status() == 404) {
-                return new SkillNotFoundException("User not found");
+                return new SkillNotFoundException("Skill not found");
             }
             if (response.status() == 403) {
                 return new AccessDeniedException("Access denied");

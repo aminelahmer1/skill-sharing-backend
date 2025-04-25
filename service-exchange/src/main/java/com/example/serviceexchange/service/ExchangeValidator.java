@@ -17,14 +17,14 @@ public class ExchangeValidator {
             throw new AccessDeniedException("You can only create exchanges as yourself");
         }
 
-        if (request.providerId().equals(request.receiverId())) {
-            throw new InvalidExchangeException("Provider and Receiver cannot be the same user");
+        if (request.producerId().equals(request.receiverId())) {
+            throw new InvalidExchangeException("Producer and Receiver cannot be the same user");
         }
     }
 
-    public void validateSkill(SkillResponse skill, Long providerId) {
-        if (!providerId.equals(skill.userId())) {
-            throw new InvalidExchangeException("Skill does not belong to the provider");
+    public void validateSkill(SkillResponse skill, Long producerId) {
+        if (!producerId.equals(skill.userId())) {
+            throw new InvalidExchangeException("Skill does not belong to the producer");
         }
     }
 
@@ -34,14 +34,14 @@ public class ExchangeValidator {
         }
 
         String userId = jwt.getSubject();
-        boolean isProvider = userId.equals(exchange.getProviderId().toString());
+        boolean isProducer = userId.equals(exchange.getProducerId().toString());
         boolean isReceiver = userId.equals(exchange.getReceiverId().toString());
 
         switch (exchange.getStatus()) {
             case ExchangeStatus.PENDING:
                 if ((ExchangeStatus.ACCEPTED.equals(newStatus) ||
-                        ExchangeStatus.REJECTED.equals(newStatus)) && !isProvider) {
-                    throw new AccessDeniedException("Only provider can accept/reject pending exchanges");
+                        ExchangeStatus.REJECTED.equals(newStatus)) && !isProducer) {
+                    throw new AccessDeniedException("Only producer can accept/reject pending exchanges");
                 }
                 break;
             case ExchangeStatus.ACCEPTED:

@@ -45,6 +45,9 @@ public class User {
     @Embedded
     private Address address;
 
+    private String pictureUrl;
+    private String phoneNumber;
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
     @Column(name = "role")
@@ -60,5 +63,5 @@ public class User {
 
     @Column(nullable = false)
     @Builder.Default
-    private boolean isActive = true; // Pour indiquer si l'utilisateur est actif
+    private boolean isActive = true;
 }

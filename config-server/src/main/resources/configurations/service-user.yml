@@ -29,7 +29,7 @@ keycloak:
   auth-server-url: http://localhost:9098
   realm: skill-sharing
   client-id: gateway-service
-  client-secret: oLdwxIS2DaNSeELasubWHBTCRUEIvpEF
+  client-secret: dC1ITokTu5PfK91X4q7p91hf9tjZeBuP
   admin-client-id: admin-cli
   admin-username: admin
   admin-password: admin

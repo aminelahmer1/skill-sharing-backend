@@ -23,6 +23,18 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-server-spi</artifactId>
+            <version>24.0.2</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-server-spi-private</artifactId>
+            <version>24.0.2</version>
+            <scope>provided</scope>
+        </dependency>
         <!-- JPA and Database -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

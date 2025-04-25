@@ -9,25 +9,26 @@ import com.example.serviceskill.repository.*;
 import com.example.serviceskill.service.SkillMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-
-@Service
+import java.util.List;@Service
 @RequiredArgsConstructor
+@Slf4j
 public class SkillService {
+
     private final CategoryRepository categoryRepository;
     private final SkillRepository skillRepository;
     private final SkillMapper skillMapper;
 
     @Transactional
     public Integer createSkill(SkillRequest request, Jwt jwt) {
-        // Vérification du rôle
-        if (!jwt.getClaimAsStringList("roles").contains("PROVIDER")) {
-            throw new AccessDeniedException("Only providers can create skills");
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        if (roles == null || !roles.contains("PRODUCER")) {
+            throw new AccessDeniedException("Only producers can create skills");
         }
 
         Category category = categoryRepository.findById(request.categoryId())
@@ -36,6 +37,7 @@ public class SkillService {
         Skill skill = skillMapper.toSkill(request, Long.parseLong(jwt.getSubject()));
         skill.setCategory(category);
 
+        log.info("Skill created successfully by user ID: {}", jwt.getSubject());
         return skillRepository.save(skill).getId();
     }
 
@@ -56,7 +58,6 @@ public class SkillService {
         Skill skill = skillRepository.findById(id)
                 .orElseThrow(() -> new SkillNotFoundException("Skill not found"));
 
-        // Vérification de l'ownership
         if (!skill.getUserId().equals(Long.parseLong(jwt.getSubject()))) {
             throw new AccessDeniedException("You can only update your own skills");
         }
@@ -66,6 +67,7 @@ public class SkillService {
         skill.setAvailableQuantity(request.availableQuantity());
         skill.setPrice(request.price());
 
+        log.info("Skill with ID {} updated by user ID: {}", id, jwt.getSubject());
         return skillMapper.toSkillResponse(skillRepository.save(skill));
     }
 
@@ -79,12 +81,13 @@ public class SkillService {
         }
 
         skillRepository.delete(skill);
+        log.info("Skill with ID {} deleted by user ID: {}", id, jwt.getSubject());
     }
 
     @Transactional
     public void registerForSkill(Integer skillId, Jwt jwt) {
-        // Vérification du rôle
-        if (!jwt.getClaimAsStringList("roles").contains("RECEIVER")) {
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        if (roles == null || !roles.contains("RECEIVER")) {
             throw new AccessDeniedException("Only receivers can register for skills");
         }
 
@@ -97,5 +100,6 @@ public class SkillService {
 
         skill.setNbInscrits(skill.getNbInscrits() + 1);
         skillRepository.save(skill);
+        log.info("User ID {} registered for skill ID {}", jwt.getSubject(), skillId);
     }
 }

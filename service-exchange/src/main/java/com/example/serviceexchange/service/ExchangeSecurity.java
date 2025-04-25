@@ -22,7 +22,7 @@ public class ExchangeSecurity {
                 .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found"));
 
         String userId = jwt.getSubject();
-        return userId.equals(exchange.getProviderId().toString()) ||
+        return userId.equals(exchange.getProducerId().toString()) ||
                 userId.equals(exchange.getReceiverId().toString());
     }
 
@@ -33,17 +33,17 @@ public class ExchangeSecurity {
         return jwt.getSubject().equals(exchange.getReceiverId().toString());
     }
 
-    public void validateExchangeCreation(UserResponse provider, UserResponse receiver, ExchangeRequest request) {
-        if (!"PROVIDER".equals(provider.role())) {
-            throw new InvalidExchangeException("Provider must have PROVIDER role");
+    public void validateExchangeCreation(UserResponse producer, UserResponse receiver, ExchangeRequest request) {
+        if (!"PRODUCER".equals(producer.role())) {
+            throw new InvalidExchangeException("Producer must have PRODUCER role");
         }
 
         if (!"RECEIVER".equals(receiver.role())) {
             throw new InvalidExchangeException("Receiver must have RECEIVER role");
         }
 
-        if (request.providerId().equals(request.receiverId())) {
-            throw new InvalidExchangeException("Provider and Receiver cannot be the same user");
+        if (request.producerId().equals(request.receiverId())) {
+            throw new InvalidExchangeException("Producer and Receiver cannot be the same user");
         }
     }
 }

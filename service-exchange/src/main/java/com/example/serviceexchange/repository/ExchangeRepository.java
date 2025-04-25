@@ -13,5 +13,5 @@ public interface ExchangeRepository extends JpaRepository<Exchange, Integer> {
     List<Exchange> findByReceiverId(Long receiverId);
     List<Exchange> findBySkillId(Integer skillId);
 
-    List<Exchange>findByProviderIdOrReceiverId(Long providerId, Long receiverId);
+    List<Exchange>findByProducerIdOrReceiverId(Long producerID, Long receiverId);
 }

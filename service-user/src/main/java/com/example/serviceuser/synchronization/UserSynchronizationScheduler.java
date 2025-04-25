@@ -14,9 +14,9 @@ public class UserSynchronizationScheduler {
     private final UserService userService;
 
     /**
-     * Automatically syncs users from Keycloak every hour.
+     * Scheduled user synchronization with Keycloak every hour.
      */
-    @Scheduled(fixedRate = 3600000) // Every 1 hour
+    @Scheduled(fixedRate = 6000)
     public void scheduleUserSynchronization() {
         log.info("Scheduled synchronization with Keycloak started...");
         userService.syncUsersWithKeycloak();

@@ -4,10 +4,10 @@ import java.time.LocalDateTime;
 
 public record ExchangeResponse(
         Integer id,
-        Long providerId,
+        Long producerId,
         Long receiverId,
         Integer skillId,
         String status,
         LocalDateTime createdAt,
-        Integer providerRating
+        Integer producerRating
 ) {}

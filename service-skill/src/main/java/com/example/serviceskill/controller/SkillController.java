@@ -19,8 +19,8 @@ public class SkillController {
 
     private final SkillService skillService;
 
-    @PostMapping
-    @PreAuthorize("hasRole('PROVIDER')")
+    @PostMapping("/create")
+    @PreAuthorize("hasRole('PRODUCER')")
     public ResponseEntity<Integer> createSkill(
             @RequestBody @Valid SkillRequest request,
             @AuthenticationPrincipal Jwt jwt
@@ -39,7 +39,7 @@ public class SkillController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('PROVIDER')")
+    @PreAuthorize("hasRole('PRODUCER')")
     public ResponseEntity<SkillResponse> updateSkill(
             @PathVariable Integer id,
             @RequestBody @Valid SkillRequest request,
@@ -49,7 +49,7 @@ public class SkillController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('PROVIDER')")
+    @PreAuthorize("hasRole('PRODUCER')")
     public ResponseEntity<Void> deleteSkill(
             @PathVariable Integer id,
             @AuthenticationPrincipal Jwt jwt

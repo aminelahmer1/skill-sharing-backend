@@ -28,7 +28,8 @@ public class SecurityConfig {
         http.csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/users/sync", "/api/v1/users/test").permitAll() // Public endpoints
-                        .requestMatchers("/api/v1/users/**").authenticated() // Secured endpoints
+                        .requestMatchers("/api/v1/users/**").authenticated()
+                        .requestMatchers("/api/v1/users/by-keycloak-id").authenticated()// Secured endpoints
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2

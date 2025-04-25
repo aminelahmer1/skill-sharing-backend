@@ -25,7 +25,7 @@ public class SecurityConfig {
             "/api/v1/users/*"
     };
 
-    private static final String[] PROVIDER_RECEIVER_ENDPOINTS = {
+    private static final String[] PRODUCER_RECEIVER_ENDPOINTS = {
             "/api/v1/skills/**",
             "/api/v1/exchanges/**"
     };
@@ -36,7 +36,7 @@ public class SecurityConfig {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchange -> exchange
                         .pathMatchers(PUBLIC_ENDPOINTS).permitAll()
-                        .pathMatchers(PROVIDER_RECEIVER_ENDPOINTS).hasAnyRole("PROVIDER", "RECEIVER")
+                        .pathMatchers(PRODUCER_RECEIVER_ENDPOINTS).hasAnyRole("PRODUCER", "RECEIVER")
                         .anyExchange().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtReactiveAuthenticationConverter())));

@@ -22,11 +22,6 @@ public class KeycloakConfig {
     @Value("${keycloak.client-secret}")
     private String clientSecret;
 
-    /**
-     * Creates a Keycloak admin client with Client Credentials Grant.
-     *
-     * @return Keycloak admin client instance.
-     */
     @Bean
     public Keycloak keycloakAdminClient() {
         return KeycloakBuilder.builder()

@@ -11,8 +11,8 @@ import lombok.*;
 @Builder
 public class Address {
     private String street;
-    private String locality; // Ville
-    private String region;   // Gouvernorat/État/Province
+    private String locality;
+    private String region;
     private String postalCode;
     private String country;
 }

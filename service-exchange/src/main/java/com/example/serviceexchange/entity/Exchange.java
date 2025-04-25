@@ -19,8 +19,8 @@ public class Exchange {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    @Column(name = "provider_id", nullable = false)
-    private Long providerId;
+    @Column(name = "producer_id", nullable = false)
+    private Long producerId;
 
     @Column(name = "receiver_id", nullable = false)
     private Long receiverId;
@@ -32,8 +32,8 @@ public class Exchange {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "provider_rating")
-    private Integer providerRating;
+    @Column(name = "producer_rating")
+    private Integer producerRating;
 
     @Column(nullable = false)
     private String status;
