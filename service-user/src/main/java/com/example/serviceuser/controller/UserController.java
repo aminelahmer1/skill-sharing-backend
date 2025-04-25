@@ -1,5 +1,7 @@
 package com.example.serviceuser.controller;
 
+import com.example.serviceuser.dto.AddressUpdateRequest;
+import com.example.serviceuser.dto.UserProfileUpdateRequest;
 import com.example.serviceuser.dto.UserResponse;
 import com.example.serviceuser.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -46,5 +48,28 @@ public class UserController {
         log.info("Request received to fetch all users...");
         List<UserResponse> users = userService.findAllUsers();
         return ResponseEntity.ok(users);
+    }
+    @PatchMapping("/{keycloakId}/picture")
+    public ResponseEntity<Void> updatePicture(
+            @PathVariable String keycloakId,
+            @RequestBody String pictureUrl) {
+        userService.updateUserPicture(keycloakId, pictureUrl);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/{keycloakId}/address")
+    public ResponseEntity<Void> updateAddress(
+            @PathVariable String keycloakId,
+            @RequestBody AddressUpdateRequest request) {
+        userService.updateUserAddress(keycloakId, request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/{keycloakId}/profile")
+    public ResponseEntity<Void> updateProfile(
+            @PathVariable String keycloakId,
+            @RequestBody UserProfileUpdateRequest request) {
+        userService.updateUserProfile(keycloakId, request);
+        return ResponseEntity.noContent().build();
     }
 }

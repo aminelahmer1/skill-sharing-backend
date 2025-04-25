@@ -1,7 +1,10 @@
 package com.example.serviceuser.service;
 
 import com.example.serviceuser.configuration.KeycloakAdminService;
+import com.example.serviceuser.dto.AddressUpdateRequest;
+import com.example.serviceuser.dto.UserProfileUpdateRequest;
 import com.example.serviceuser.dto.UserResponse;
+import com.example.serviceuser.entity.Address;
 import com.example.serviceuser.entity.User;
 import com.example.serviceuser.exception.UserNotFoundException;
 import com.example.serviceuser.repository.UserRepository;
@@ -11,7 +14,9 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -141,4 +146,57 @@ public class UserService {
                 ? kcUser.getAttributes().getOrDefault(attributeName, List.of()).stream().findFirst().orElse(null)
                 : null;
     }
+
+
+    private User getUserOrThrow(String keycloakId) {
+        return userRepository.findByKeycloakId(keycloakId)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+    }
+    @Transactional
+    public void updateUserPicture(String keycloakId, String pictureUrl) {
+        User user = getUserOrThrow(keycloakId);
+        user.setPictureUrl(pictureUrl);
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+        log.info("Updated picture for user: {}", keycloakId);
+    }
+    @Transactional
+    public void updateUserAddress(String keycloakId, AddressUpdateRequest request) {
+        User user = getUserOrThrow(keycloakId);
+
+        Address address = Optional.ofNullable(user.getAddress())
+                .orElseGet(Address::new);
+
+        address.setCity(request.city());
+        address.setCountry(request.country());
+        address.setPostalCode(request.postalCode());
+
+        user.setAddress(address);
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+        log.info("Updated address for user: {}", keycloakId);
+    }
+    @Transactional
+    public void updateUserProfile(String keycloakId, UserProfileUpdateRequest request) {
+        User user = getUserOrThrow(keycloakId);
+
+        // Update basic info
+        if (request.firstName() != null) user.setFirstName(request.firstName());
+        if (request.lastName() != null) user.setLastName(request.lastName());
+        if (request.phoneNumber() != null) user.setPhoneNumber(request.phoneNumber());
+
+        // Update picture
+        if (request.pictureUrl() != null) user.setPictureUrl(request.pictureUrl());
+
+        // Update address
+        if (request.address() != null) {
+            updateUserAddress(keycloakId, request.address());
+        }
+
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+        log.info("Updated profile for user: {}", keycloakId);
+    }
+
+
 }
