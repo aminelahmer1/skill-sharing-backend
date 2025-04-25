@@ -10,9 +10,7 @@ import lombok.*;
 @AllArgsConstructor
 @Builder
 public class Address {
-    private String street;
-    private String locality;
-    private String region;
-    private String postalCode;
+    private String city;
     private String country;
+    private String postalCode;
 }

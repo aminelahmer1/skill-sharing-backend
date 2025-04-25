@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -18,131 +19,126 @@ import java.util.stream.Collectors;
 @Slf4j
 public class UserService {
 
+    private static final String PHONE_ATTRIBUTE = "phone-mapper";
+    private static final String CITY_ATTRIBUTE = "city";
+    private static final String COUNTRY_ATTRIBUTE = "country";
+    private static final String POSTAL_CODE_ATTRIBUTE = "postal_code";
+
     private final UserRepository userRepository;
     private final KeycloakAdminService keycloakAdminService;
     private final UserMapper userMapper;
 
-    /**
-     * Synchronize users with Keycloak, handle deletions, and update roles.
-     */
+    @Transactional
     public void syncUsersWithKeycloak() {
         log.info("Starting user synchronization with Keycloak...");
 
-        // Fetch all users from Keycloak
         List<UserRepresentation> keycloakUsers = keycloakAdminService.getAllUsers();
-        List<String> keycloakIds = keycloakUsers.stream()
-                .map(UserRepresentation::getId)
-                .collect(Collectors.toList());
+        List<String> activeKeycloakIds = extractKeycloakIds(keycloakUsers);
 
-        // Fetch all users from the database
-        List<User> databaseUsers = userRepository.findAll();
+        removeOrphanedUsers(activeKeycloakIds);
+        processUsersSynchronization(keycloakUsers);
 
-        // Detect and delete users no longer in Keycloak
-        List<User> usersToDelete = databaseUsers.stream()
-                .filter(user -> !keycloakIds.contains(user.getKeycloakId()))
-                .collect(Collectors.toList());
-
-        usersToDelete.forEach(user -> {
-            log.info("Deleting user from database: {}", user.getUsername());
-            userRepository.delete(user);
-        });
-
-        // Synchronize Keycloak users with the database
-        keycloakUsers.forEach(kcUser -> {
-            String roleAttribute = keycloakAdminService.getUserRoleAttribute(kcUser);
-            List<String> roles = keycloakAdminService.getUserRoles(kcUser.getId());
-
-            // Assign realm role if needed
-            if (roleAttribute != null && !roles.contains(roleAttribute)) {
-                keycloakAdminService.assignRealmRoleToUser(kcUser.getId(), roleAttribute);
-            }
-
-            synchronizeUser(kcUser, roles); // Synchronize user roles
-        });
-
-        log.info("User synchronization with Keycloak completed successfully.");
+        log.info("User synchronization completed. Processed {} users.", keycloakUsers.size());
     }
 
-    /**
-     * Synchronize a single user with the local database.
-     */
-    private void synchronizeUser(UserRepresentation kcUser, List<String> roles) {
-        String userId = kcUser.getId();
+    private List<String> extractKeycloakIds(List<UserRepresentation> users) {
+        return users.stream()
+                .map(UserRepresentation::getId)
+                .collect(Collectors.toList());
+    }
 
-        // Create or update user in the database
+    private void removeOrphanedUsers(List<String> activeKeycloakIds) {
+        List<User> usersToRemove = userRepository.findAll().stream()
+                .filter(user -> !activeKeycloakIds.contains(user.getKeycloakId()))
+                .peek(user -> log.info("Removing orphaned user: {}", user.getUsername()))
+                .collect(Collectors.toList());
+
+        if (!usersToRemove.isEmpty()) {
+            userRepository.deleteAll(usersToRemove);
+        }
+    }
+
+    private void processUsersSynchronization(List<UserRepresentation> keycloakUsers) {
+        keycloakUsers.forEach(kcUser -> {
+            List<String> roles = synchronizeUserRoles(kcUser);
+            synchronizeUserData(kcUser, roles);
+        });
+    }
+
+    private List<String> synchronizeUserRoles(UserRepresentation kcUser) {
+        List<String> roles = keycloakAdminService.getUserRoles(kcUser.getId());
+        String roleAttribute = keycloakAdminService.getUserRoleAttribute(kcUser);
+
+        if (shouldAssignNewRole(roleAttribute, roles)) {
+            keycloakAdminService.assignRealmRoleToUser(kcUser.getId(), roleAttribute);
+            roles.add(roleAttribute);
+        }
+
+        return roles;
+    }
+
+    private boolean shouldAssignNewRole(String roleAttribute, List<String> roles) {
+        return roleAttribute != null && !roles.contains(roleAttribute);
+    }
+
+    private void synchronizeUserData(UserRepresentation kcUser, List<String> roles) {
+        String userId = kcUser.getId();
         userRepository.findByKeycloakId(userId)
                 .ifPresentOrElse(
-                        existingUser -> {
-                            log.info("Updating existing user: {}", existingUser.getUsername());
-                            userMapper.updateFromKeycloak(existingUser, kcUser);
-                            existingUser.setRoles(roles); // Update roles
-                            userRepository.save(existingUser);
-                        },
-                        () -> {
-                            log.info("Creating new user with Keycloak ID: {}", userId);
-                            User newUser = new User();
-                            userMapper.updateFromKeycloak(newUser, kcUser);
-                            newUser.setKeycloakId(userId);
-                            newUser.setRoles(roles); // Assign roles
-                            userRepository.save(newUser);
-                        }
+                        existingUser -> updateExistingUser(existingUser, kcUser, roles),
+                        () -> createNewUser(kcUser, roles)
                 );
     }
 
-    /**
-     * Find a user by their Keycloak ID.
-     */
+    private void updateExistingUser(User user, UserRepresentation kcUser, List<String> roles) {
+        log.debug("Updating existing user: {}", user.getUsername());
+        userMapper.updateFromKeycloak(user, kcUser);
+        user.setRoles(roles);
+        userRepository.save(user);
+    }
+
+    private void createNewUser(UserRepresentation kcUser, List<String> roles) {
+        log.info("Creating new user with Keycloak ID: {}", kcUser.getId());
+        User newUser = new User();
+        userMapper.updateFromKeycloak(newUser, kcUser);
+        newUser.setKeycloakId(kcUser.getId());
+        newUser.setRoles(roles);
+        userRepository.save(newUser);
+    }
+
+    @Transactional(readOnly = true)
     public UserResponse findByKeycloakId(String keycloakId) {
         return userRepository.findByKeycloakId(keycloakId)
                 .map(userMapper::toResponse)
                 .orElseThrow(() -> new UserNotFoundException("User not found with Keycloak ID: " + keycloakId));
     }
 
-    /**
-     * Find a user by their database ID.
-     */
+    @Transactional(readOnly = true)
     public UserResponse findById(Long userId) {
         return userRepository.findById(userId)
                 .map(userMapper::toResponse)
                 .orElseThrow(() -> new UserNotFoundException("User not found with ID: " + userId));
     }
 
-    /**
-     * Fetch all users from the database.
-     */
+    @Transactional(readOnly = true)
     public List<UserResponse> findAllUsers() {
-        log.info("Fetching all users from the database...");
+        log.info("Fetching all users from database");
         return userRepository.findAll().stream()
                 .map(userMapper::toResponse)
                 .collect(Collectors.toList());
     }
+
+    @Transactional
     public void syncSingleUser(String userId) {
-        log.info("Synchronizing user with Keycloak ID: {}", userId);
-
+        log.info("Synchronizing single user: {}", userId);
         UserRepresentation kcUser = keycloakAdminService.getUserById(userId);
-        String roleAttribute = keycloakAdminService.getUserRoleAttribute(kcUser);
-        List<String> roles = keycloakAdminService.getUserRoles(userId);
+        List<String> roles = synchronizeUserRoles(kcUser);
+        synchronizeUserData(kcUser, roles);
+    }
 
-        if (roleAttribute != null && !roles.contains(roleAttribute)) {
-            keycloakAdminService.assignRealmRoleToUser(userId, roleAttribute);
-        }
-
-        userRepository.findByKeycloakId(userId)
-                .ifPresentOrElse(
-                        existingUser -> {
-                            log.info("Updating existing user: {}", existingUser.getUsername());
-                            userMapper.updateFromKeycloak(existingUser, kcUser);
-                            existingUser.setRoles(roles);
-                            userRepository.save(existingUser);
-                        },
-                        () -> {
-                            log.info("Creating new user with Keycloak ID: {}", userId);
-                            User newUser = new User();
-                            userMapper.updateFromKeycloak(newUser, kcUser);
-                            newUser.setKeycloakId(userId);
-                            newUser.setRoles(roles);
-                            userRepository.save(newUser);
-                        }
-                );
+    private String getFirstAttribute(UserRepresentation kcUser, String attributeName) {
+        return kcUser.getAttributes() != null
+                ? kcUser.getAttributes().getOrDefault(attributeName, List.of()).stream().findFirst().orElse(null)
+                : null;
     }
 }

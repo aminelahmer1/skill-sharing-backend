@@ -22,7 +22,7 @@ public class SecurityConfig {
             "/actuator/**",
             "/api/v1/auth/**",
             "/api/v1/users/sync",
-            "/api/v1/users/*"
+            "/api/v1/users/test"
     };
 
     private static final String[] PRODUCER_RECEIVER_ENDPOINTS = {
@@ -37,6 +37,7 @@ public class SecurityConfig {
                 .authorizeExchange(exchange -> exchange
                         .pathMatchers(PUBLIC_ENDPOINTS).permitAll()
                         .pathMatchers(PRODUCER_RECEIVER_ENDPOINTS).hasAnyRole("PRODUCER", "RECEIVER")
+                        .pathMatchers("/api/v1/users/**").authenticated()
                         .anyExchange().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtReactiveAuthenticationConverter())));
@@ -47,10 +48,7 @@ public class SecurityConfig {
         return jwt -> {
             JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
             converter.setJwtGrantedAuthoritiesConverter(new KeycloakRealmRoleConverter());
-            return Mono.just(converter.convert(jwt)); // Wrap the result in a Mono
+            return Mono.just(converter.convert(jwt));
         };
     }
-
-
-
 }

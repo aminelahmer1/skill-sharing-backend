@@ -1,8 +1,8 @@
 package com.example.serviceuser.service;
 
+import com.example.serviceuser.dto.UserResponse;
 import com.example.serviceuser.entity.Address;
 import com.example.serviceuser.entity.User;
-import com.example.serviceuser.dto.UserResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Component;
@@ -14,6 +14,8 @@ import java.util.List;
 @Slf4j
 public class UserMapper {
 
+    private static final String PHONE_ATTRIBUTE = "phone-mapper";
+
     public void updateFromKeycloak(User user, UserRepresentation kcUser) {
         log.info("Updating user with Keycloak data: {}", kcUser.getId());
         user.setUsername(kcUser.getUsername());
@@ -22,23 +24,26 @@ public class UserMapper {
         user.setLastName(kcUser.getLastName());
 
         if (kcUser.getAttributes() != null) {
-            // Mettre à jour l'adresse
-            Address address = new Address();
-            address.setStreet(getFirstAttribute(kcUser, "street"));
-            address.setLocality(getFirstAttribute(kcUser, "locality"));
-            address.setRegion(getFirstAttribute(kcUser, "region"));
-            address.setPostalCode(getFirstAttribute(kcUser, "postal_code"));
-            address.setCountry(getFirstAttribute(kcUser, "country"));
-            user.setAddress(address);
+            // Synchronisation explicite du numéro de téléphone
+            String phoneNumber = kcUser.getAttributes().getOrDefault(PHONE_ATTRIBUTE, List.of())
+                    .stream().findFirst().orElse(null);
+            if (phoneNumber != null) {
+                user.setPhoneNumber(phoneNumber);
+                log.debug("Updated phone number for user {}: {}", kcUser.getUsername(), phoneNumber);
+            }
 
-            // Mettre à jour l'image (pictureUrl) et le numéro de téléphone (phoneNumber)
-            user.setPictureUrl(getFirstAttribute(kcUser, "picture_url"));
-            user.setPhoneNumber(getFirstAttribute(kcUser, "phoneNumber")); // utilisez "phone_number" si c'est le nom dans Keycloak
+            // Mise à jour de l'adresse
+            if (user.getAddress() == null) {
+                user.setAddress(new Address());
+            }
+            Address address = user.getAddress();
+            address.setCity(getFirstAttribute(kcUser, "city"));
+            address.setCountry(getFirstAttribute(kcUser, "country"));
+            address.setPostalCode(getFirstAttribute(kcUser, "postal_code"));
         }
 
         user.setUpdatedAt(LocalDateTime.now());
     }
-
     private String getFirstAttribute(UserRepresentation kcUser, String attributeName) {
         return kcUser.getAttributes() != null
                 ? kcUser.getAttributes().getOrDefault(attributeName, List.of()).stream().findFirst().orElse(null)
@@ -54,7 +59,9 @@ public class UserMapper {
                 user.getEmail(),
                 user.getFirstName(),
                 user.getLastName(),
-                user.getAddress(),
+                user.getAddress() != null ? user.getAddress().getCity() : null,
+                user.getAddress() != null ? user.getAddress().getCountry() : null,
+                user.getAddress() != null ? user.getAddress().getPostalCode() : null,
                 user.getRoles(),
                 user.getCreatedAt(),
                 user.getUpdatedAt(),
