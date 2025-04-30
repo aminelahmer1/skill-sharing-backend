@@ -11,11 +11,12 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
+@CrossOrigin
 public class UserProfileController {
 
     private final UserService userService;
 
-    @GetMapping("/{userId}")
+    @GetMapping("/id/{userId}")
     public ResponseEntity<UserResponse> getUserProfile(@PathVariable Long userId) {
         return ResponseEntity.ok(userService.findById(userId));
     }

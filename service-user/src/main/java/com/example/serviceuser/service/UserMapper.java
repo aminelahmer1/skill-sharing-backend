@@ -1,8 +1,7 @@
 package com.example.serviceuser.service;
 
-import com.example.serviceuser.dto.UserResponse;
-import com.example.serviceuser.entity.Address;
-import com.example.serviceuser.entity.User;
+import com.example.serviceuser.dto.*;
+import com.example.serviceuser.entity.*;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Component;
@@ -24,15 +23,12 @@ public class UserMapper {
         user.setLastName(kcUser.getLastName());
 
         if (kcUser.getAttributes() != null) {
-            // Synchronisation explicite du numéro de téléphone
             String phoneNumber = kcUser.getAttributes().getOrDefault(PHONE_ATTRIBUTE, List.of())
                     .stream().findFirst().orElse(null);
             if (phoneNumber != null) {
                 user.setPhoneNumber(phoneNumber);
-                log.debug("Updated phone number for user {}: {}", kcUser.getUsername(), phoneNumber);
             }
 
-            // Mise à jour de l'adresse
             if (user.getAddress() == null) {
                 user.setAddress(new Address());
             }
@@ -44,6 +40,7 @@ public class UserMapper {
 
         user.setUpdatedAt(LocalDateTime.now());
     }
+
     private String getFirstAttribute(UserRepresentation kcUser, String attributeName) {
         return kcUser.getAttributes() != null
                 ? kcUser.getAttributes().getOrDefault(attributeName, List.of()).stream().findFirst().orElse(null)
@@ -51,7 +48,6 @@ public class UserMapper {
     }
 
     public UserResponse toResponse(User user) {
-        log.info("Mapping user to UserResponse: {}", user.getKeycloakId());
         return new UserResponse(
                 user.getId(),
                 user.getKeycloakId(),
@@ -67,6 +63,27 @@ public class UserMapper {
                 user.getUpdatedAt(),
                 user.getPictureUrl(),
                 user.getPhoneNumber()
+        );
+    }
+
+    public UserProfileResponse toProfileResponse(User user) {
+        return new UserProfileResponse(
+                user.getId(),
+                user.getKeycloakId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getFirstName(),
+                user.getLastName(),
+                user.getAddress() != null ? new AddressResponse(
+                        user.getAddress().getCity(),
+                        user.getAddress().getCountry(),
+                        user.getAddress().getPostalCode()
+                ) : null,
+                user.getPictureUrl(),
+                user.getPhoneNumber(),
+                user.getRoles(),
+                user.getCreatedAt(),
+                user.getUpdatedAt()
         );
     }
 }
