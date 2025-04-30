@@ -6,5 +6,6 @@ public record UserProfileUpdateRequest(
         String lastName,      // Synchronisé avec Keycloak
         String phoneNumber,   // Reste local
         AddressUpdateRequest address,  // Reste local
-        String pictureUrl     // Reste local
+        String pictureUrl   ,  // Reste local
+        String bio
 ) {}

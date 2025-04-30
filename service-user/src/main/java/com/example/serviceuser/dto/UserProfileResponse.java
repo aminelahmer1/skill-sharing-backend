@@ -12,6 +12,7 @@ public record UserProfileResponse(
         String lastName,
         AddressResponse address,
         String pictureUrl,
+        String bio,
         String phoneNumber,
         List<String> roles,
         LocalDateTime createdAt,

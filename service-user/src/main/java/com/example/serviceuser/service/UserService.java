@@ -85,6 +85,7 @@ public class UserService {
         // 1. Sauvegarde des champs à préserver
         String originalPictureUrl = user.getPictureUrl();
         Address originalAddress = user.getAddress();
+        String originalBio = user.getBio(); // Sauvegarde de la bio
 
         // 2. Mise à jour des champs synchronisés
         user.setUsername(kcUser.getUsername());
@@ -92,11 +93,19 @@ public class UserService {
         user.setFirstName(kcUser.getFirstName());
         user.setLastName(kcUser.getLastName());
 
-        // 3. Mise à jour conditionnelle du téléphone
-        if (kcUser.getAttributes() != null && kcUser.getAttributes().containsKey(PHONE_ATTRIBUTE)) {
-            String newPhone = kcUser.getAttributes().get(PHONE_ATTRIBUTE).get(0);
-            if (!newPhone.equals(user.getPhoneNumber())) {
-                user.setPhoneNumber(newPhone);
+        // 3. Mise à jour conditionnelle du téléphone et de la bio
+        if (kcUser.getAttributes() != null) {
+            if (kcUser.getAttributes().containsKey(PHONE_ATTRIBUTE)) {
+                String newPhone = kcUser.getAttributes().get(PHONE_ATTRIBUTE).get(0);
+                if (!newPhone.equals(user.getPhoneNumber())) {
+                    user.setPhoneNumber(newPhone);
+                }
+            }
+
+            // Ajout de la synchronisation de la bio
+            if (kcUser.getAttributes().containsKey("bio")) {
+                String newBio = kcUser.getAttributes().get("bio").get(0);
+                user.setBio(newBio);
             }
         }
 
@@ -105,9 +114,10 @@ public class UserService {
             user.setRoles(newRoles);
         }
 
-        // 5. Restauration des champs préservés
+        // 5. Restauration des champs préservés si non synchronisés
         user.setPictureUrl(originalPictureUrl);
         user.setAddress(originalAddress);
+        user.setBio(originalBio);
 
         // 6. Sauvegarde uniquement si nécessaire
         if (user.getUpdatedAt() == null ||
@@ -116,7 +126,6 @@ public class UserService {
             userRepository.save(user);
         }
     }
-
     private void createNewUser(UserRepresentation kcUser, List<String> roles) {
         log.info("Creating new user with Keycloak ID: {}", kcUser.getId());
         User newUser = new User();
@@ -126,6 +135,7 @@ public class UserService {
 
         // Valeurs par défaut pour les champs non synchronisés
         newUser.setPictureUrl(null);
+        newUser.setBio(null);
         newUser.setAddress(null);
 
         userRepository.save(newUser);
@@ -216,7 +226,9 @@ public class UserService {
         if (request.pictureUrl() != null) {
             user.setPictureUrl(request.pictureUrl());
         }
-
+        if (request.bio() !=null){
+            user.setBio((request.bio()));
+        }
         if (request.address() != null) {
             Address address = Optional.ofNullable(user.getAddress())
                     .orElseGet(Address::new);
@@ -306,21 +318,26 @@ public class UserService {
         // 2. Update local database
         User user = getUserOrThrow(keycloakId);
 
-        if(request.phoneNumber() != null) {
+        if (request.phoneNumber() != null) {
             user.setPhoneNumber(request.phoneNumber());
         }
 
         Address address = user.getAddress() != null ?
                 user.getAddress() : new Address();
 
-        if(request.city() != null) address.setCity(request.city());
-        if(request.country() != null) address.setCountry(request.country());
-        if(request.postalCode() != null) address.setPostalCode(request.postalCode());
+        if (request.city() != null) address.setCity(request.city());
+        if (request.country() != null) address.setCountry(request.country());
+        if (request.postalCode() != null) address.setPostalCode(request.postalCode());
 
         user.setAddress(address);
 
-        if(request.pictureUrl() != null) {
+        if (request.pictureUrl() != null) {
             user.setPictureUrl(request.pictureUrl());
+        }
+
+        // Ajout de la mise à jour de la bio
+        if (request.bio() != null) {
+            user.setBio(request.bio());
         }
 
         userRepository.save(user);
@@ -330,7 +347,6 @@ public class UserService {
 
         return userMapper.toResponse(user);
     }
-
     private void syncSingleUserFromKeycloak(String username) {
         UserRepresentation kcUser = keycloakAdminService.getUserByUsername(username);
         synchronizeUserData(kcUser, keycloakAdminService.getUserRoles(kcUser.getId()));
@@ -365,6 +381,9 @@ public class UserService {
 
         if (request.pictureUrl() != null) {
             user.setPictureUrl(request.pictureUrl());
+        }
+        if (request.bio()!=null){
+            user.setBio(request.bio());
         }
 
         if (request.address() != null) {
@@ -421,16 +440,15 @@ public class UserService {
                 kcUser.getEmail(),
                 chooseValue(localUser.getFirstName(), kcUser.getFirstName()),
                 chooseValue(localUser.getLastName(), kcUser.getLastName()),
-                addressResponse,  // Utilisez addressResponse au lieu de localUser.getAddress()
+                addressResponse,
                 localUser.getPictureUrl(),
-                Optional.ofNullable(localUser.getPhoneNumber())
-                        .orElseGet(() -> extractPhoneFromKeycloak(kcUser)),
+                localUser.getBio(),
+                chooseValue(localUser.getPhoneNumber(), extractPhoneFromKeycloak(kcUser)),
                 extractRoles(kcUser),
                 localUser.getCreatedAt(),
                 localUser.getUpdatedAt()
         );
     }
-
     private String chooseValue(String localValue, String kcValue) {
         return localValue != null ? localValue : kcValue;
     }
@@ -446,4 +464,5 @@ public class UserService {
         // Implémentation existante de récupération des rôles
         return keycloakAdminService.getUserRoles(kcUser.getId());
     }
+
 }

@@ -23,8 +23,11 @@ public interface UserServiceClient {
             @RequestHeader("Authorization") String token
     );
 
-    @GetMapping("/by-keycloak-id")
-    UserResponse getUserByKeycloakId(
-            @RequestParam String keycloakId,
-            @RequestHeader("Authorization") String token
-    );}
+
+        @GetMapping("/api/v1/users/by-keycloak-id/{keycloakId}")
+        UserResponse getUserByKeycloakId(
+                @PathVariable String keycloakId,
+                @RequestHeader("Authorization") String token);
+
+
+}

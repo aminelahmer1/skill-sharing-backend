@@ -50,6 +50,8 @@ public class User {
     private String pictureUrl;
     private String phoneNumber;
 
+    private String bio;
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
     @Column(name = "role")

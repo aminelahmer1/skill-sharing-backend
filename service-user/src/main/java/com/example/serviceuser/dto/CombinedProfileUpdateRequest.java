@@ -8,5 +8,6 @@ public record CombinedProfileUpdateRequest(
         @Nullable String lastName,
         @Nullable String phoneNumber,
         @Nullable String pictureUrl,
+        @Nullable String bio,
         @Nullable AddressUpdateRequest address
 ){}

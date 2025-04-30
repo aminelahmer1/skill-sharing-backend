@@ -1,19 +1,44 @@
 package com.example.serviceskill.dto;
 
-import com.example.serviceuser.entity.Address;
+
+import com.example.serviceuser.entity.User;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 public record UserResponse(
-        Long userId,
+        Long id,
         String keycloakId,
         String username,
         String email,
         String firstName,
         String lastName,
-        Address address,
+        String city,
+        String country,
+        String postalCode,
         List<String> roles,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
-) {}
+        LocalDateTime updatedAt,
+        String pictureUrl,
+        String phoneNumber
+) {
+    public UserResponse(User user) {
+        this(
+                user.getId(),
+                user.getKeycloakId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getFirstName(),
+                user.getLastName(),
+                user.getAddress() != null ? user.getAddress().getCity() : null,
+                user.getAddress() != null ? user.getAddress().getCountry() : null,
+                user.getAddress() != null ? user.getAddress().getPostalCode() : null,
+                user.getRoles(),
+                user.getCreatedAt(),
+                user.getUpdatedAt(),
+                user.getPictureUrl(),
+                user.getPhoneNumber()
+        );
+    }
+
+}

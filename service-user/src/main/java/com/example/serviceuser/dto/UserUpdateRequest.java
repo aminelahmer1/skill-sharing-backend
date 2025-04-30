@@ -5,5 +5,6 @@ public record UserUpdateRequest(
         String city,
         String country,
         String postalCode,
-        String pictureUrl
+        String pictureUrl,
+        String bio
 ) {}

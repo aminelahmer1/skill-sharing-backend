@@ -29,6 +29,13 @@ public class UserMapper {
                 user.setPhoneNumber(phoneNumber);
             }
 
+            // Ajout de la bio depuis Keycloak si présente
+            String bio = kcUser.getAttributes().getOrDefault("bio", List.of())
+                    .stream().findFirst().orElse(null);
+            if (bio != null) {
+                user.setBio(bio);
+            }
+
             if (user.getAddress() == null) {
                 user.setAddress(new Address());
             }
@@ -62,10 +69,10 @@ public class UserMapper {
                 user.getCreatedAt(),
                 user.getUpdatedAt(),
                 user.getPictureUrl(),
+                user.getBio(),
                 user.getPhoneNumber()
         );
     }
-
     public UserProfileResponse toProfileResponse(User user) {
         return new UserProfileResponse(
                 user.getId(),
@@ -80,6 +87,7 @@ public class UserMapper {
                         user.getAddress().getPostalCode()
                 ) : null,
                 user.getPictureUrl(),
+                user.getBio(),
                 user.getPhoneNumber(),
                 user.getRoles(),
                 user.getCreatedAt(),
