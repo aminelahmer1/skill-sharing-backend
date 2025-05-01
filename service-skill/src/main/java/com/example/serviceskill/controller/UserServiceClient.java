@@ -2,13 +2,12 @@ package com.example.serviceskill.controller;
 
 import com.example.serviceskill.configuration.FeignConfig;
 
+import com.example.serviceskill.dto.SkillAdditionRequest;
 import com.example.serviceskill.dto.UserResponse;
+import com.example.serviceuser.dto.ProducerSkillsResponse;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.*;
 
 @FeignClient(
         name = "service-user",
@@ -20,14 +19,17 @@ public interface UserServiceClient {
     @GetMapping("/{userId}")
     ResponseEntity<UserResponse> getUserById(
             @PathVariable Long userId,
-            @RequestHeader("Authorization") String token
-    );
+            @RequestHeader("Authorization") String token);
 
+    @GetMapping("/by-keycloak-id")
+    UserResponse getUserByKeycloakId(
+            @RequestParam String keycloakId,
+            @RequestHeader("Authorization") String token);
 
-        @GetMapping("/api/v1/users/by-keycloak-id/{keycloakId}")
-        UserResponse getUserByKeycloakId(
-                @PathVariable String keycloakId,
-                @RequestHeader("Authorization") String token);
-
+    @PostMapping("/{userId}/skills")
+    void addSkillToUser(
+            @PathVariable Long userId,
+            @RequestBody SkillAdditionRequest request,
+            @RequestHeader("Authorization") String token);
 
 }

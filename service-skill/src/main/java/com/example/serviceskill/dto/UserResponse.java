@@ -20,6 +20,7 @@ public record UserResponse(
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         String pictureUrl,
+        String bio,
         String phoneNumber
 ) {
     public UserResponse(User user) {
@@ -37,6 +38,7 @@ public record UserResponse(
                 user.getCreatedAt(),
                 user.getUpdatedAt(),
                 user.getPictureUrl(),
+                user.getBio(),
                 user.getPhoneNumber()
         );
     }

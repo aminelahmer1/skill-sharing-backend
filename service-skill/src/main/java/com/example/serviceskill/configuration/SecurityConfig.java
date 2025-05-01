@@ -26,14 +26,15 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.csrf(AbstractHttpConfigurer::disable)
+        http
+                .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/skills/**", "/api/v1/categories/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/skills/**", "/api/v1/categories/**").hasRole("PRODUCER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/skills", "/api/v1/skills/**", "/api/v1/categories", "/api/v1/categories/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/skills", "/api/v1/skills/**", "/api/v1/categories", "/api/v1/categories/**").hasRole("PRODUCER")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/skills/**", "/api/v1/categories/**").hasRole("PRODUCER")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/skills/**", "/api/v1/categories/**").hasRole("PRODUCER")
-                        .requestMatchers(HttpMethod.POST, "/api/v1/skills/**/register").hasRole("RECEIVER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/skills/*/register").hasRole("RECEIVER")
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2

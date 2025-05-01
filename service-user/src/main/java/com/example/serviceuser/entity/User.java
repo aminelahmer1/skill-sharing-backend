@@ -68,4 +68,19 @@ public class User {
     @Column(nullable = false)
     @Builder.Default
     private boolean isActive = true;
+
+    @ElementCollection
+    @CollectionTable(name = "user_skills", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "skill_id")
+    @Builder.Default
+    private Set<Integer> skillIds = new HashSet<>();
+
+    // Méthodes helpers modifiées
+    public void addSkillId(Integer skillId) {
+        skillIds.add(skillId);
+    }
+
+    public void removeSkillId(Integer skillId) {
+        skillIds.remove(skillId);
+    }
 }

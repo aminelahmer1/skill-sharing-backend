@@ -20,11 +20,8 @@ public class UserProfileController {
     public ResponseEntity<UserResponse> getUserProfile(@PathVariable Long userId) {
         return ResponseEntity.ok(userService.findById(userId));
     }
-    @GetMapping("/keycloak/{keycloakId}")
+    @GetMapping("/by-keycloak-id")
     public ResponseEntity<UserResponse> getUserByKeycloakId(
-            @RequestParam String keycloakId,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
+            @RequestParam String keycloakId) {
         return ResponseEntity.ok(userService.findByKeycloakId(keycloakId));
-    }
-}
+}}

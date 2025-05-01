@@ -19,7 +19,7 @@ public class SkillController {
 
     private final SkillService skillService;
 
-    @PostMapping("/create")
+    @PostMapping
     @PreAuthorize("hasRole('PRODUCER')")
     public ResponseEntity<Integer> createSkill(
             @RequestBody @Valid SkillRequest request,
