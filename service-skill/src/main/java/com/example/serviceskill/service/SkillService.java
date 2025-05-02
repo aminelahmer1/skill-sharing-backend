@@ -18,7 +18,10 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
-import java.util.List;@Service
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
 @RequiredArgsConstructor
 @Slf4j
 public class SkillService {
@@ -27,6 +30,21 @@ public class SkillService {
     private final SkillRepository skillRepository;
     private final SkillMapper skillMapper;
     private final UserServiceClient userServiceClient;
+
+    private UserResponse getAuthenticatedUser(Jwt jwt) {
+        String keycloakId = jwt.getSubject();
+        UserResponse user = userServiceClient.getUserByKeycloakId(
+                keycloakId,
+                "Bearer " + jwt.getTokenValue()
+        );
+
+        if (user == null) {
+            throw new UserNotFoundException("User not found for Keycloak ID: " + keycloakId);
+        }
+
+        return user;
+    }
+
     @Transactional
     public Integer createSkill(SkillRequest request, Jwt jwt) {
         // 1. Récupérer l'utilisateur via son keycloakId
@@ -70,34 +88,74 @@ public class SkillService {
 
     @Transactional
     public SkillResponse updateSkill(Integer id, SkillRequest request, Jwt jwt) {
-        Skill skill = skillRepository.findById(id)
-                .orElseThrow(() -> new SkillNotFoundException("Skill not found"));
+        // 1. Récupérer l'utilisateur via son keycloakId
+        String keycloakId = jwt.getSubject();
+        UserResponse user = userServiceClient.getUserByKeycloakId(
+                keycloakId,
+                "Bearer " + jwt.getTokenValue()
+        );
 
-        Long currentUserId = Long.parseLong(jwt.getSubject());
-        if (!skill.getUserId().equals(currentUserId)) {
+        if (user == null) {
+            throw new UserNotFoundException("User not found for Keycloak ID: " + keycloakId);
+        }
+
+        // 2. Vérifier le rôle
+        if (!user.roles().contains("PRODUCER")) {
+            throw new AccessDeniedException("Only producers can update skills");
+        }
+
+        // 3. Vérifier que la compétence existe et appartient à l'utilisateur
+        Skill skill = skillRepository.findById(id)
+                .orElseThrow(() -> new SkillNotFoundException("Skill not found with ID: " + id));
+
+        if (!skill.getUserId().equals(user.id())) {
             throw new AccessDeniedException("You can only update your own skills");
         }
 
+        // 4. Vérifier que la catégorie existe
+        Category category = categoryRepository.findById(request.categoryId())
+                .orElseThrow(() -> new CategoryNotFoundException("Category not found"));
+
+        // 5. Mettre à jour la compétence
         skill.setName(request.name());
         skill.setDescription(request.description());
         skill.setAvailableQuantity(request.availableQuantity());
         skill.setPrice(request.price());
+        skill.setCategory(category);
 
-        log.info("Skill with ID {} updated by producer ID: {}", id, currentUserId);
+        log.info("Skill updated by user ID: {} (Keycloak ID: {})", user.id(), keycloakId);
         return skillMapper.toSkillResponse(skillRepository.save(skill));
     }
+
     @Transactional
     public void deleteSkill(Integer id, Jwt jwt) {
-        Skill skill = skillRepository.findById(id)
-                .orElseThrow(() -> new SkillNotFoundException("Skill not found"));
+        // 1. Récupérer l'utilisateur via son keycloakId
+        String keycloakId = jwt.getSubject();
+        UserResponse user = userServiceClient.getUserByKeycloakId(
+                keycloakId,
+                "Bearer " + jwt.getTokenValue()
+        );
 
-        Long currentUserId = Long.parseLong(jwt.getSubject());
-        if (!skill.getUserId().equals(currentUserId)) {
+        if (user == null) {
+            throw new UserNotFoundException("User not found for Keycloak ID: " + keycloakId);
+        }
+
+        // 2. Vérifier le rôle
+        if (!user.roles().contains("PRODUCER")) {
+            throw new AccessDeniedException("Only producers can delete skills");
+        }
+
+        // 3. Vérifier que la compétence existe et appartient à l'utilisateur
+        Skill skill = skillRepository.findById(id)
+                .orElseThrow(() -> new SkillNotFoundException("Skill not found with ID: " + id));
+
+        if (!skill.getUserId().equals(user.id())) {
             throw new AccessDeniedException("You can only delete your own skills");
         }
 
+        // 4. Supprimer la compétence
         skillRepository.delete(skill);
-        log.info("Skill with ID {} deleted by producer ID: {}", id, currentUserId);
+        log.info("Skill deleted by user ID: {} (Keycloak ID: {})", user.id(), keycloakId);
     }
 
     @Transactional
@@ -118,4 +176,51 @@ public class SkillService {
         skillRepository.save(skill);
         log.info("User ID {} registered for skill ID {}", jwt.getSubject(), skillId);
     }
+
+    public List<SkillResponse> findSkillsByProducerId(Long producerId, Jwt jwt) {
+        // 1. Récupérer l'utilisateur demandeur
+        UserResponse requestingUser = getAuthenticatedUser(jwt);
+
+        // 2. Récupérer l'utilisateur producteur
+        UserResponse producer = userServiceClient.getUserById(
+                producerId,
+                "Bearer " + jwt.getTokenValue()
+        ).getBody();
+
+        if (producer == null) {
+            throw new UserNotFoundException("Producer not found with ID: " + producerId);
+        }
+
+        // 3. Vérifier que l'utilisateur est bien un PRODUCER
+        if (!producer.roles().contains("PRODUCER")) {
+            throw new AccessDeniedException("The requested user is not a PRODUCER");
+        }
+
+        // 4. Récupérer les compétences
+        List<Skill> skills = skillRepository.findByUserId(producerId);
+
+        return skills.stream()
+                .map(skillMapper::toSkillResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<SkillResponse> findMySkills(Jwt jwt) {
+        // 1. Récupérer l'utilisateur connecté
+        UserResponse user = getAuthenticatedUser(jwt);
+
+        // 2. Vérifier que c'est bien un PRODUCER
+        if (!user.roles().contains("PRODUCER")) {
+            throw new AccessDeniedException("Only producers can view their skills");
+        }
+
+        // 3. Récupérer les compétences de l'utilisateur
+        List<Skill> skills = skillRepository.findByUserId(user.id());
+
+        // 4. Convertir en DTO
+        return skills.stream()
+                .map(skillMapper::toSkillResponse)
+                .collect(Collectors.toList());
+    }
+
+
 }

@@ -10,7 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
-
+/*
 @Component
 @RequiredArgsConstructor
 public class ExchangeSecurity {
@@ -46,4 +46,4 @@ public class ExchangeSecurity {
             throw new InvalidExchangeException("Producer and Receiver cannot be the same user");
         }
     }
-}
+}*/

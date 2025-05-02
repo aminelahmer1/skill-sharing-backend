@@ -4,14 +4,12 @@ import com.example.serviceexchange.entity.Exchange;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Repository
 public interface ExchangeRepository extends JpaRepository<Exchange, Integer> {
-    List<Exchange> findByProviderId(Long providerId);
+    List<Exchange> findByProducerId(Long producerId);
     List<Exchange> findByReceiverId(Long receiverId);
     List<Exchange> findBySkillId(Integer skillId);
-
-    List<Exchange>findByProducerIdOrReceiverId(Long producerID, Long receiverId);
+    List<Exchange> findByProducerIdOrReceiverId(Long producerId, Long receiverId);
 }

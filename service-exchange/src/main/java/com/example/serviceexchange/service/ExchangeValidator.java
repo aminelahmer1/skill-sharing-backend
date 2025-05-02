@@ -2,23 +2,29 @@ package com.example.serviceexchange.service;
 
 import com.example.serviceexchange.dto.ExchangeRequest;
 import com.example.serviceexchange.dto.SkillResponse;
+import com.example.serviceexchange.dto.UserResponse;
 import com.example.serviceexchange.entity.Exchange;
 import com.example.serviceexchange.entity.ExchangeStatus;
 import com.example.serviceexchange.exception.*;
+import com.example.serviceexchange.repository.ExchangeRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
 @Component
 public class ExchangeValidator {
+private ExchangeRepository exchangeRepository;
+    public void validateExchangeCreation(ExchangeRequest request, UserResponse producer, UserResponse receiver) {
+        if (!producer.roles().contains("PRODUCER")) {
+            throw new InvalidExchangeException("The producer must have PRODUCER role");
+        }
 
-    public void validateExchangeCreation(ExchangeRequest request, Jwt jwt) {
-        if (!jwt.getSubject().equals(request.receiverId().toString())) {
-            throw new AccessDeniedException("You can only create exchanges as yourself");
+        if (!receiver.roles().contains("RECEIVER")) {
+            throw new InvalidExchangeException("The receiver must have RECEIVER role");
         }
 
         if (request.producerId().equals(request.receiverId())) {
-            throw new InvalidExchangeException("Producer and Receiver cannot be the same user");
+            throw new InvalidExchangeException("Producer and receiver cannot be the same user");
         }
     }
 
@@ -66,5 +72,22 @@ public class ExchangeValidator {
         if (!ExchangeStatus.ACCEPTED.equals(exchange.getStatus())) {
             throw new InvalidStatusException("Only accepted exchanges can be rated");
         }
+    }
+
+    // Méthodes pour les annotations de sécurité
+    public boolean isExchangeParticipant(Integer exchangeId, Jwt jwt) {
+        Exchange exchange = exchangeRepository.findById(exchangeId)
+                .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found"));
+
+        String userId = jwt.getSubject();
+        return userId.equals(exchange.getProducerId().toString()) ||
+                userId.equals(exchange.getReceiverId().toString());
+    }
+
+    public boolean isReceiver(Integer exchangeId, Jwt jwt) {
+        Exchange exchange = exchangeRepository.findById(exchangeId)
+                .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found"));
+
+        return jwt.getSubject().equals(exchange.getReceiverId().toString());
     }
 }

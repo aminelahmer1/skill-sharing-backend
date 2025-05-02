@@ -25,4 +25,7 @@ public interface SkillRepository extends JpaRepository<Skill, Integer> {
             @Param("minPrice") Double minPrice,
             @Param("maxPrice") Double maxPrice
     );
+
+    List<Skill> findByUserId(Long userId);
+
 }

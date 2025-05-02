@@ -1,6 +1,7 @@
 package com.example.serviceskill.controller;
 import com.example.serviceskill.dto.SkillRequest;
 import com.example.serviceskill.dto.SkillResponse;
+import com.example.serviceskill.dto.UserResponse;
 import com.example.serviceskill.service.SkillService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -67,4 +68,20 @@ public class SkillController {
         skillService.registerForSkill(id, jwt);
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/producer/{producerId}")
+    public ResponseEntity<List<SkillResponse>> getSkillsByProducer(
+            @PathVariable Long producerId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(skillService.findSkillsByProducerId(producerId, jwt));
+    }
+
+    @GetMapping("/my-skills")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<List<SkillResponse>> getMySkills(
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(skillService.findMySkills(jwt));
+    }
+
+
 }

@@ -2,14 +2,13 @@ package com.example.serviceexchange.service;
 
 import com.example.serviceexchange.FeignClient.SkillServiceClient;
 import com.example.serviceexchange.FeignClient.UserServiceClient;
-import com.example.serviceexchange.dto.ExchangeRequest;
-import com.example.serviceexchange.dto.ExchangeResponse;
-import com.example.serviceexchange.dto.SkillResponse;
+import com.example.serviceexchange.dto.*;
 import com.example.serviceexchange.entity.Exchange;
 import com.example.serviceexchange.entity.ExchangeStatus;
 import com.example.serviceexchange.exception.ExchangeNotFoundException;
 import com.example.serviceexchange.repository.ExchangeRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,12 +25,34 @@ public class ExchangeService {
     private final SkillServiceClient skillServiceClient;
     private final ExchangeValidator exchangeValidator;
 
+    private UserResponse getAuthenticatedUser(Jwt jwt) {
+        return userServiceClient.getUserByKeycloakId(
+                jwt.getSubject(),
+                "Bearer " + jwt.getTokenValue()
+        );
+    }
+
     @Transactional
     public ExchangeResponse createExchange(ExchangeRequest request, Jwt jwt) {
-        exchangeValidator.validateExchangeCreation(request, jwt);
+        UserResponse receiver = getAuthenticatedUser(jwt);
+
+        if (!receiver.roles().contains("RECEIVER")) {
+            throw new AccessDeniedException("Only receivers can create exchanges");
+        }
+
+        if (!receiver.id().equals(request.receiverId())) {
+            throw new AccessDeniedException("You can only create exchanges for yourself");
+        }
+
+        UserResponse producer = userServiceClient.getUserById(
+                request.producerId(),
+                "Bearer " + jwt.getTokenValue()
+        );
+
+        exchangeValidator.validateExchangeCreation(request, producer, receiver);
 
         SkillResponse skill = skillServiceClient.getSkillById(request.skillId());
-        exchangeValidator.validateSkill(skill, request.producerId());
+        exchangeValidator.validateSkill(skill, producer.id());
 
         Exchange exchange = Exchange.builder()
                 .producerId(request.producerId())
@@ -46,34 +67,34 @@ public class ExchangeService {
 
     @Transactional
     public ExchangeResponse updateStatus(Integer exchangeId, String newStatus, Jwt jwt) {
-        Exchange exchange = getExchangeById(exchangeId);
-        exchangeValidator.validateStatusUpdate(exchange, newStatus, jwt);
+        UserResponse user = getAuthenticatedUser(jwt);
+        Exchange exchange = exchangeRepository.findById(exchangeId)
+                .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found"));
 
+        exchangeValidator.validateStatusUpdate(exchange, newStatus, jwt);
         exchange.setStatus(newStatus);
+
         return toResponse(exchangeRepository.save(exchange));
     }
 
     @Transactional
     public ExchangeResponse rateExchange(Integer exchangeId, Integer rating, Jwt jwt) {
-        Exchange exchange = getExchangeById(exchangeId);
-        exchangeValidator.validateRating(exchange, rating, jwt);
+        Exchange exchange = exchangeRepository.findById(exchangeId)
+                .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found"));
 
+        exchangeValidator.validateRating(exchange, rating, jwt);
         exchange.setProducerRating(rating);
         exchange.setStatus(ExchangeStatus.COMPLETED);
+
         return toResponse(exchangeRepository.save(exchange));
     }
 
     public List<ExchangeResponse> getUserExchanges(Jwt jwt) {
-        Long userId = Long.parseLong(jwt.getSubject());
-        return exchangeRepository.findByProducerIdOrReceiverId(userId, userId)
+        UserResponse user = getAuthenticatedUser(jwt);
+        return exchangeRepository.findByProducerIdOrReceiverId(user.id(), user.id())
                 .stream()
                 .map(this::toResponse)
                 .toList();
-    }
-
-    private Exchange getExchangeById(Integer id) {
-        return exchangeRepository.findById(id)
-                .orElseThrow(() -> new ExchangeNotFoundException("Exchange not found with id: " + id));
     }
 
     private ExchangeResponse toResponse(Exchange exchange) {
