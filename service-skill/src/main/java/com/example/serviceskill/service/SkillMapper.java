@@ -18,6 +18,7 @@ public class SkillMapper {
                 .nbInscrits(0)
                 .category(Category.builder().id(request.categoryId()).build())
                 .userId(userId)
+                .pictureUrl(request.pictureUrl())
                 .build();
     }
 
@@ -32,7 +33,8 @@ public class SkillMapper {
                 skill.getCategory().getId(),
                 skill.getCategory().getName(),
                 skill.getCategory().getDescription(),
-                skill.getUserId()
+                skill.getUserId(),
+                skill.getPictureUrl()
         );
     }
 }

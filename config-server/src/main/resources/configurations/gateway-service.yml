@@ -1,16 +1,11 @@
 spring:
   cloud:
     gateway:
-      globals:
+      globalcors:
         cors-configurations:
           '[/**]':
             allowed-origins: "http://localhost:4200"
-            allowed-methods:
-              - GET
-              - POST
-              - PUT
-              - DELETE
-              - OPTIONS
+            allowed-methods: "*"
             allowed-headers: "*"
             allow-credentials: true
             exposed-headers: "Authorization"
@@ -26,14 +21,12 @@ spring:
           filters:
             - TokenRelay
 
-
         - id: service-skill
           uri: lb://SERVICE-SKILL
           predicates:
             - Path=/api/v1/skills/**,/api/v1/categories/**
           filters:
             - TokenRelay
-
 
         - id: service-exchange
           uri: lb://SERVICE-EXCHANGE
@@ -42,12 +35,19 @@ spring:
           filters:
             - TokenRelay
 
-        - id: keycloak-auth
-          uri: http://localhost:9098
+        - id: service-user-uploads
+          uri: lb://SERVICE-USER
           predicates:
-            - Path=/auth/**
+            - Path=/uploads/**
           filters:
-            - RewritePath=/auth/(?<segment>.*), /realms/skill-sharing/\${segment}
+            - RewritePath=/uploads/(?<segment>.*), /uploads/${segment}
+
+        - id: service-skill-uploads
+          uri: lb://SERVICE-SKILL
+          predicates:
+            - Path=/skill-uploads/**
+          filters:
+            - RewritePath=/skill-uploads/(?<segment>.*), /skill-uploads/${segment}
 
   main:
     web-application-type: reactive

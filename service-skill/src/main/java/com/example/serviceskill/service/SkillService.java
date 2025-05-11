@@ -9,6 +9,9 @@ import com.example.serviceskill.entity.Skill;
 import com.example.serviceskill.exception.*;
 import com.example.serviceskill.repository.*;
 import com.example.serviceskill.service.SkillMapper;
+import com.example.serviceuser.entity.User;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,7 +19,9 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -30,6 +35,7 @@ public class SkillService {
     private final SkillRepository skillRepository;
     private final SkillMapper skillMapper;
     private final UserServiceClient userServiceClient;
+ private  final  FileStorageService fileStorageService;
 
     private UserResponse getAuthenticatedUser(Jwt jwt) {
         String keycloakId = jwt.getSubject();
@@ -222,5 +228,46 @@ public class SkillService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional
+    public Integer createSkillWithPicture(SkillRequest request, MultipartFile file, Jwt jwt) {
+        String pictureUrl = null;
+        if (file != null && !file.isEmpty()) {
+            pictureUrl = fileStorageService.storeFile(file);
+        }
+
+        SkillRequest requestWithPicture = new SkillRequest(
+                request.id(),
+                request.name(),
+                request.description(),
+                request.availableQuantity(),
+                request.price(),
+                request.categoryId(),
+                pictureUrl
+        );
+
+        return createSkill(requestWithPicture, jwt);
+    }
+
+    @Transactional
+    public SkillResponse updateSkillPicture(Integer id, MultipartFile file, Jwt jwt) {
+        // Validation de l'utilisateur
+        UserResponse user = getAuthenticatedUser(jwt);
+
+        // Récupération de la compétence
+        Skill skill = skillRepository.findById(id)
+                .orElseThrow(() -> new SkillNotFoundException("Skill not found"));
+
+        // Vérification des droits
+        if (!skill.getUserId().equals(user.id())) {
+            throw new AccessDeniedException("You can only update your own skills");
+        }
+
+        // Stockage du fichier
+        String pictureUrl = fileStorageService.storeFile(file);
+        skill.setPictureUrl(pictureUrl);
+
+        // Sauvegarde
+        return skillMapper.toSkillResponse(skillRepository.save(skill));
+    }
 
 }

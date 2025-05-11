@@ -12,5 +12,6 @@ public record SkillResponse(
         Integer categoryId,
         String categoryName,
         String categoryDescription,
-        Long userId
+        Long userId,
+        String pictureUrl
 ) {}

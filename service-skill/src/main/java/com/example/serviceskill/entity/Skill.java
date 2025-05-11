@@ -62,6 +62,7 @@ public class Skill {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    private String pictureUrl;
     @Version
     private Integer version;
 

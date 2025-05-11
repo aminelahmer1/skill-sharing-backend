@@ -25,7 +25,7 @@ import org.keycloak.representations.idm.CredentialRepresentation;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin
+//@CrossOrigin
 public class KeycloakAdminService {
 
     private final Keycloak keycloak;

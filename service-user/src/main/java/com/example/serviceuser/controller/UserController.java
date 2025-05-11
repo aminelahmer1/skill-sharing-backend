@@ -1,4 +1,5 @@
 package com.example.serviceuser.controller;
+import com.example.serviceuser.service.FileStorageService;
 import jakarta.validation.Valid;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,12 +25,13 @@ import java.util.List;
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin
+//@CrossOrigin(origins = "http://localhost:4200", allowCredentials = "true")
 public class UserController {
 
     private final UserService userService;
     private final JwtDecoder jwtDecoder;
     private final KeycloakAdminService keycloakAdminService;
+    private  final FileStorageService fileStorageService;
     @PostMapping("/sync")
     public ResponseEntity<String> syncUsers() {
         log.info("Manual synchronization request received...");
@@ -52,16 +54,7 @@ public class UserController {
         return ResponseEntity.ok(users);
     }
 
-    @PostMapping(value = "/{keycloakId}/picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<UserResponse> updateUserPicture(
-            @PathVariable String keycloakId,
-            @RequestParam("file") MultipartFile file,
-            @RequestHeader("Authorization") String token) {
 
-        validateUserAccess(keycloakId, token);
-        UserResponse updatedUser = userService.updateUserPicture(keycloakId, file);
-        return ResponseEntity.ok(updatedUser);
-    }
 
     @PatchMapping("/{keycloakId}/address")
     public ResponseEntity<Void> updateAddress(
@@ -74,7 +67,7 @@ public class UserController {
     @PatchMapping("/{keycloakId}/profile")
     public ResponseEntity<UserResponse> updateProfile(
             @PathVariable String keycloakId,
-            @RequestBody CombinedProfileUpdateRequest request) {  // Changé ici
+            @RequestBody CombinedProfileUpdateRequest request) {
         UserResponse updatedUser = userService.updateUserProfile(keycloakId, request);
         return ResponseEntity.ok(updatedUser);
     }
@@ -147,11 +140,17 @@ public class UserController {
         return ResponseEntity.ok(userService.updateLocalProfile(keycloakId, request));
     }
 
-    @PatchMapping("/{keycloakId}/picture")
+    @PatchMapping(value = "/{keycloakId}/picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<UserResponse> updateProfilePicture(
             @PathVariable String keycloakId,
-            @RequestParam String pictureUrl) {
-        UserResponse updatedUser = userService.updateProfilePicture(keycloakId, pictureUrl);
+            @RequestParam("file") MultipartFile file,
+            @RequestHeader("Authorization") String token) {
+
+        validateUserAccess(keycloakId, token);
+        String fileUrl = fileStorageService.storeFile(file);
+        UserResponse updatedUser = userService.updateProfilePicture(keycloakId, fileUrl);
         return ResponseEntity.ok(updatedUser);
     }
+
+
 }
