@@ -4,7 +4,7 @@ import com.example.serviceskill.configuration.FeignConfig;
 
 import com.example.serviceskill.dto.SkillAdditionRequest;
 import com.example.serviceskill.dto.UserResponse;
-import com.example.serviceuser.dto.ProducerSkillsResponse;
+
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;

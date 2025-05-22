@@ -6,23 +6,22 @@ import com.example.serviceskill.dto.SkillResponse;
 import com.example.serviceskill.dto.UserResponse;
 import com.example.serviceskill.entity.Category;
 import com.example.serviceskill.entity.Skill;
-import com.example.serviceskill.exception.*;
-import com.example.serviceskill.repository.*;
-import com.example.serviceskill.service.SkillMapper;
-import com.example.serviceuser.entity.User;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.persistence.EntityNotFoundException;
+import com.example.serviceskill.exception.CategoryNotFoundException;
+import com.example.serviceskill.exception.InscriptionLimitExceededException;
+import com.example.serviceskill.exception.SkillNotFoundException;
+import com.example.serviceskill.exception.UserNotFoundException;
+import com.example.serviceskill.repository.CategoryRepository;
+import com.example.serviceskill.repository.SkillRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.math.BigDecimal;
-import java.util.Collection;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -73,6 +72,8 @@ public class SkillService {
         Category category = categoryRepository.findById(request.categoryId())
                 .orElseThrow(() -> new CategoryNotFoundException("Category not found"));
 
+        validateStreamingDate(request.streamingDate());
+
         Skill skill = skillMapper.toSkill(request, user.id()); // Utiliser l'ID DB ici
         skill.setCategory(category);
         skill.setUserId(user.id()); // Assurer que userId est bien défini
@@ -122,13 +123,15 @@ public class SkillService {
         Category category = categoryRepository.findById(request.categoryId())
                 .orElseThrow(() -> new CategoryNotFoundException("Category not found"));
 
+        validateStreamingDate(request.streamingDate());
         // 5. Mettre à jour la compétence
         skill.setName(request.name());
         skill.setDescription(request.description());
         skill.setAvailableQuantity(request.availableQuantity());
         skill.setPrice(request.price());
         skill.setCategory(category);
-
+        skill.setStreamingDate(request.streamingDate());
+        skill.setStreamingTime(request.streamingTime());
         log.info("Skill updated by user ID: {} (Keycloak ID: {})", user.id(), keycloakId);
         return skillMapper.toSkillResponse(skillRepository.save(skill));
     }
@@ -242,7 +245,9 @@ public class SkillService {
                 request.availableQuantity(),
                 request.price(),
                 request.categoryId(),
-                pictureUrl
+                pictureUrl,
+                request.streamingDate(),
+                request.streamingTime()
         );
 
         return createSkill(requestWithPicture, jwt);
@@ -268,6 +273,47 @@ public class SkillService {
 
         // Sauvegarde
         return skillMapper.toSkillResponse(skillRepository.save(skill));
+    }
+    private void validateStreamingDate(String streamingDate) {
+        LocalDate now = LocalDate.now();
+        LocalDate maxDate = LocalDate.of(2050, 12, 31);
+        LocalDate date = LocalDate.parse(streamingDate, DateTimeFormatter.ISO_LOCAL_DATE);
+
+        if (date.isBefore(now) || date.isAfter(maxDate)) {
+            throw new IllegalArgumentException("La date de streaming doit être entre aujourd'hui et le 31 décembre 2050");
+        }
+    }
+    @Transactional
+    public void incrementInscrits(Integer skillId, Jwt jwt) {
+        UserResponse user = userServiceClient.getUserByKeycloakId(jwt.getSubject(), "Bearer " + jwt.getTokenValue());
+        if (!user.roles().contains("RECEIVER")) {
+            throw new AccessDeniedException("Only receivers can increment registrations");
+        }
+        Skill skill = skillRepository.findById(skillId)
+                .orElseThrow(() -> new SkillNotFoundException("Skill not found with ID: " + skillId));
+        if (skill.getNbInscrits() >= skill.getAvailableQuantity()) {
+            throw new InscriptionLimitExceededException("No available slots");
+        }
+        skill.incrementRegistrations();
+        skillRepository.save(skill);
+        log.info("Incremented nbInscrits for skill ID: {}. New value: {}", skillId, skill.getNbInscrits());
+    }
+
+    @Transactional
+    public void decrementInscrits(Integer skillId, Jwt jwt) {
+        UserResponse user = userServiceClient.getUserByKeycloakId(jwt.getSubject(), "Bearer " + jwt.getTokenValue());
+        if (!user.roles().contains("PRODUCER")) {
+            throw new AccessDeniedException("Only producers can decrement registrations");
+        }
+        Skill skill = skillRepository.findById(skillId)
+                .orElseThrow(() -> new SkillNotFoundException("Skill not found with ID: " + skillId));
+        if (skill.getNbInscrits() > 0) {
+            skill.setNbInscrits(skill.getNbInscrits() - 1);
+            skillRepository.save(skill);
+            log.info("Decremented nbInscrits for skill ID: {}. New value: {}", skillId, skill.getNbInscrits());
+        } else {
+            throw new IllegalStateException("Cannot decrement nbInscrits below 0");
+        }
     }
 
 }

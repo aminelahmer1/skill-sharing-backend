@@ -1,7 +1,6 @@
 package com.example.serviceexchange.dto;
 
 import java.time.LocalDateTime;
-
 public record ExchangeResponse(
         Integer id,
         Long producerId,
@@ -9,5 +8,8 @@ public record ExchangeResponse(
         Integer skillId,
         String status,
         LocalDateTime createdAt,
-        Integer producerRating
+        LocalDateTime updatedAt,
+        LocalDateTime streamingDate,
+        Integer producerRating,
+        String rejectionReason
 ) {}

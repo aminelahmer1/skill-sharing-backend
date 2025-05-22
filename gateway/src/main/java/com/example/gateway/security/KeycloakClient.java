@@ -11,13 +11,13 @@ import java.util.Map;
 
 @FeignClient(
         name = "keycloak",
-        url = "${keycloak.auth-server-url}",
+        url = "${keycloak.auth-server-url}/realms/skill-sharing/protocol/openid-connect",
         configuration = KeycloakClientConfig.class
 )
 public interface KeycloakClient {
 
     @PostMapping(
-            path = "/realms/skill-sharing/protocol/openid-connect/token",
+            path = "/token",
             consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE
     )
     ResponseEntity<Map<String, Object>> getToken(@RequestBody MultiValueMap<String, String> params);

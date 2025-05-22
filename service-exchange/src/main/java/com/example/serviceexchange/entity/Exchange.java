@@ -14,7 +14,6 @@ import java.time.LocalDateTime;
 @Builder
 @Table(name = "exchanges")
 public class Exchange {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
@@ -32,16 +31,23 @@ public class Exchange {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
     @Column(name = "producer_rating")
     private Integer producerRating;
 
     @Column(nullable = false)
     private String status;
 
+    @Column(name = "streaming_date")
+    private LocalDateTime streamingDate;
+
     public void setStatus(String status) {
         if (!ExchangeStatus.isValid(status)) {
             throw new InvalidStatusException("Invalid status: " + status);
         }
         this.status = status;
+        this.updatedAt = LocalDateTime.now();
     }
 }

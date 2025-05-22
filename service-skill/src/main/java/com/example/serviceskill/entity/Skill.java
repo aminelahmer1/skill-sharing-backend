@@ -63,6 +63,8 @@ public class Skill {
     private LocalDateTime updatedAt;
 
     private String pictureUrl;
+    private String streamingDate;
+    private String streamingTime;
     @Version
     private Integer version;
 

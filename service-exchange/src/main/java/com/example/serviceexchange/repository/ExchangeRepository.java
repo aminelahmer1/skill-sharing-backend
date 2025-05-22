@@ -2,6 +2,8 @@ package com.example.serviceexchange.repository;
 
 import com.example.serviceexchange.entity.Exchange;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -11,5 +13,15 @@ public interface ExchangeRepository extends JpaRepository<Exchange, Integer> {
     List<Exchange> findByProducerId(Long producerId);
     List<Exchange> findByReceiverId(Long receiverId);
     List<Exchange> findBySkillId(Integer skillId);
+    List<Exchange> findBySkillIdAndStatus(Integer skillId, String status);
     List<Exchange> findByProducerIdOrReceiverId(Long producerId, Long receiverId);
+
+    @Query("SELECT e FROM Exchange e WHERE e.producerId = :userId OR e.receiverId = :userId ORDER BY e.streamingDate DESC")
+    List<Exchange> findUserExchanges(@Param("userId") Long userId);
+
+    @Query("SELECT COUNT(e) > 0 FROM Exchange e WHERE e.producerId = :producerId AND e.receiverId = :receiverId AND e.skillId = :skillId")
+    boolean existsByProducerIdAndReceiverIdAndSkillId(
+            @Param("producerId") Long producerId,
+            @Param("receiverId") Long receiverId,
+            @Param("skillId") Integer skillId);
 }

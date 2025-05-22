@@ -107,6 +107,17 @@ public class SkillController {
         return ResponseEntity.ok(skillService.updateSkillPicture(id, file, jwt));
     }
 
-
+    @PostMapping("/{skillId}/increment-inscrits")
+    @PreAuthorize("hasRole('RECEIVER')")
+    public ResponseEntity<Void> incrementInscrits(@PathVariable Integer skillId, @AuthenticationPrincipal Jwt jwt) {
+        skillService.incrementInscrits(skillId, jwt);
+        return ResponseEntity.ok().build();
+    }
+    @PostMapping("/{skillId}/decrement-inscrits")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<Void> decrementInscrits(@PathVariable Integer skillId, @AuthenticationPrincipal Jwt jwt) {
+        skillService.decrementInscrits(skillId, jwt);
+        return ResponseEntity.ok().build();
+    }
 
 }

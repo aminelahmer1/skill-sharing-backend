@@ -6,11 +6,14 @@ public record SkillResponse(
         Integer id,
         String name,
         String description,
-        double availableQuantity,
+        Integer availableQuantity,
         BigDecimal price,
-        int nbInscrits,
+        Integer nbInscrits,
         Integer categoryId,
         String categoryName,
         String categoryDescription,
-        Long userId
+        Long userId,
+        String pictureUrl,
+        String streamingDate,
+        String streamingTime
 ) {}

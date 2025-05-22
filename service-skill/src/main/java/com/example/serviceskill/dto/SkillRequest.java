@@ -12,5 +12,7 @@ public record SkillRequest(
         @Positive(message = "Available quantity should be positive") Integer availableQuantity,
         @Positive(message = "Price should be positive") BigDecimal price,
         @NotNull(message = "Skill category is required") Integer categoryId,
-        String pictureUrl
+        String pictureUrl,
+        @NotNull String streamingDate,
+        @NotNull   String streamingTime
 ) {}

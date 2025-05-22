@@ -152,5 +152,31 @@ public class UserController {
         return ResponseEntity.ok(updatedUser);
     }
 
+    @PostMapping("/register")
+    public ResponseEntity<UserResponse> registerUser(@RequestBody @Valid UserCreateRequest request) {
+        log.info("Registering user with email: {}", request.email());
+        try {
+            UserResponse response = userService.registerUser(request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (Exception e) {
+            log.error("Failed to register user: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        }
+    }
 
+    @PostMapping("/resend-verification")
+    public ResponseEntity<String> resendVerificationEmail(@RequestParam String email) {
+        log.info("Request to resend verification email for: {}", email);
+        try {
+            keycloakAdminService.resendVerificationEmail(email);
+            return ResponseEntity.ok("Verification email resent successfully");
+        } catch (UserNotFoundException e) {
+            log.error("User not found with email '{}': {}", email, e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
+        } catch (Exception e) {
+            log.error("Failed to resend verification email: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Failed to resend verification email: " + e.getMessage());
+        }
+    }
 }

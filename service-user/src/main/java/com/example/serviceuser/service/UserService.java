@@ -464,5 +464,28 @@ public class UserService {
         // Implémentation existante de récupération des rôles
         return keycloakAdminService.getUserRoles(kcUser.getId());
     }
+    @Transactional
+    public UserResponse registerUser(UserCreateRequest request) {
+        // Vérifier si l'utilisateur existe déjà
+        if (keycloakAdminService.userExists(request.username(), request.email())) {
+            throw new UserAlreadyExistsException("L'utilisateur existe déjà");
+        }
 
+        // Créer l'utilisateur dans Keycloak avec le mot de passe fourni
+        String keycloakId = keycloakAdminService.createUserInKeycloak(request);
+
+        // Créer l'utilisateur localement
+        User user = User.builder()
+                .keycloakId(keycloakId)
+                .username(request.username())
+                .email(request.email())
+                .firstName(request.firstName())
+                .lastName(request.lastName())
+                .phoneNumber(request.phoneNumber())
+                .roles(List.of(request.role()))
+                .build();
+
+        userRepository.save(user);
+        return userMapper.toResponse(user);
+    }
 }

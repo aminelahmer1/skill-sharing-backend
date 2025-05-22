@@ -29,7 +29,9 @@ public class SecurityConfig {
             "/api/v1/auth/**",
             "/api/v1/users/sync",
             "/uploads/**",
-            "/skill-uploads/**"
+            "/skill-uploads/**",
+            "/api/v1/auth/**",
+            "/api/v1/users/register"
     };
 
     private static final String[] PRODUCER_RECEIVER_ENDPOINTS = {

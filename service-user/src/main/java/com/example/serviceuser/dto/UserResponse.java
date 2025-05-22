@@ -21,25 +21,4 @@ public record UserResponse(
         String pictureUrl,
         String bio,
         String phoneNumber
-) {
-    public UserResponse(User user) {
-        this(
-                user.getId(),
-                user.getKeycloakId(),
-                user.getUsername(),
-                user.getEmail(),
-                user.getFirstName(),
-                user.getLastName(),
-                user.getAddress() != null ? user.getAddress().getCity() : null,
-                user.getAddress() != null ? user.getAddress().getCountry() : null,
-                user.getAddress() != null ? user.getAddress().getPostalCode() : null,
-                user.getRoles(),
-                user.getCreatedAt(),
-                user.getUpdatedAt(),
-                user.getPictureUrl(),
-                user.getBio(),
-                user.getPhoneNumber()
-        );
-    }
-
-}
+) {}

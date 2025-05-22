@@ -9,9 +9,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(name = "service-user", url = "${application.config.user-url}")
 public interface UserServiceClient {
+    @GetMapping("/{userId}")
+    UserResponse getUserById(@PathVariable Long userId, @RequestHeader("Authorization") String token);
 
-    @GetMapping("/{user-id}")
-    UserResponse getUserById(@PathVariable("user-id") Long userId, String s);
     @GetMapping("/by-keycloak-id")
     UserResponse getUserByKeycloakId(
             @RequestParam String keycloakId,

@@ -1,7 +1,7 @@
 package com.example.serviceexchange.dto;
 
 
-import com.example.serviceuser.entity.User;
+
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,23 +23,5 @@ public record UserResponse(
         String bio,
         String phoneNumber
 ) {
-    public UserResponse(User user) {
-        this(
-                user.getId(),
-                user.getKeycloakId(),
-                user.getUsername(),
-                user.getEmail(),
-                user.getFirstName(),
-                user.getLastName(),
-                user.getAddress() != null ? user.getAddress().getCity() : null,
-                user.getAddress() != null ? user.getAddress().getCountry() : null,
-                user.getAddress() != null ? user.getAddress().getPostalCode() : null,
-                user.getRoles(),
-                user.getCreatedAt(),
-                user.getUpdatedAt(),
-                user.getPictureUrl(),
-                user.getBio(),
-                user.getPhoneNumber()
-        );
-    }}
+   }
 

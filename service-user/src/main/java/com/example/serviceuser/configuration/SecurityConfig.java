@@ -1,5 +1,6 @@
 package com.example.serviceuser.configuration;
 
+import jakarta.ws.rs.HttpMethod;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -28,7 +29,8 @@ public class SecurityConfig {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/users/sync", "/api/v1/users/test","/uploads/**").permitAll()
+                        .requestMatchers("/api/v1/users/sync","/uploads/**","/api/v1/users/register").permitAll()
+
                         .requestMatchers("/api/v1/users/**").authenticated()
 
                         .anyRequest().authenticated()

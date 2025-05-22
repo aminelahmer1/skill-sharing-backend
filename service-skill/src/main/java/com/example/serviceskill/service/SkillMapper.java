@@ -19,6 +19,8 @@ public class SkillMapper {
                 .category(Category.builder().id(request.categoryId()).build())
                 .userId(userId)
                 .pictureUrl(request.pictureUrl())
+                .streamingDate(request.streamingDate())
+                .streamingTime(request.streamingTime())
                 .build();
     }
 
@@ -34,7 +36,9 @@ public class SkillMapper {
                 skill.getCategory().getName(),
                 skill.getCategory().getDescription(),
                 skill.getUserId(),
-                skill.getPictureUrl()
+                skill.getPictureUrl(),
+                skill.getStreamingDate(),
+                skill.getStreamingTime()
         );
     }
 }

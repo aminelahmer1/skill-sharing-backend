@@ -13,5 +13,7 @@ public record SkillResponse(
         String categoryName,
         String categoryDescription,
         Long userId,
-        String pictureUrl
+        String pictureUrl,
+        String streamingDate,
+        String streamingTime
 ) {}

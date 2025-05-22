@@ -2,11 +2,14 @@ package com.example.gateway.security;
 
 import feign.RequestInterceptor;
 import feign.Retryer;
+import feign.codec.Decoder;
+import org.springframework.beans.factory.ObjectFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.http.HttpMessageConverters;
+import org.springframework.cloud.openfeign.support.ResponseEntityDecoder;
+import org.springframework.cloud.openfeign.support.SpringDecoder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import java.util.Base64;
 
 @Configuration
 public class KeycloakClientConfig {
@@ -18,17 +21,12 @@ public class KeycloakClientConfig {
     private String clientSecret;
 
     @Bean
-    public RequestInterceptor keycloakAuthInterceptor() {
-        return template -> template.header("Authorization", getClientCredentialsAuthHeader());
-    }
-
-    private String getClientCredentialsAuthHeader() {
-        String credentials = clientId + ":" + clientSecret;
-        return "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes());
+    public Retryer retryer() {
+        return new Retryer.Default(1000, 2000, 3); // Retry 3 times with increasing intervals
     }
 
     @Bean
-    public Retryer retryer() {
-        return new Retryer.Default(1000, 2000, 3); // Retry 3 times with increasing intervals
+    public Decoder feignDecoder(ObjectFactory<HttpMessageConverters> messageConverters) {
+        return new ResponseEntityDecoder(new SpringDecoder(messageConverters));
     }
 }

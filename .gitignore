@@ -34,3 +34,8 @@ mvnw.cmd
 ### Ignorer les fichiers générés ###
 /generated/
 /generated-sources/
+
+
+# Sensitive files
+service-exchange/src/main/resources/firebase-service-account.json
+skill-uploads/
