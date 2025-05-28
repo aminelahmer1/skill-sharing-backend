@@ -2,6 +2,7 @@ package com.example.serviceexchange.controller;
 
 import com.example.serviceexchange.dto.ExchangeRequest;
 import com.example.serviceexchange.dto.ExchangeResponse;
+import com.example.serviceexchange.dto.SkillResponse;
 import com.example.serviceexchange.service.ExchangeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -74,4 +75,20 @@ public class ExchangeController {
     ) {
         return ResponseEntity.ok(exchangeService.getUserExchanges(jwt));
     }
-}
+
+    @GetMapping("/pending")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<List<SkillResponse>> getPendingExchanges(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        return ResponseEntity.ok(exchangeService.getPendingExchangesForProducer(jwt));
+    }
+
+    @PutMapping("/{skillId}/accept-all")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<List<ExchangeResponse>> acceptAllPendingExchanges(
+            @PathVariable Integer skillId,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        return ResponseEntity.ok(exchangeService.acceptAllPendingExchanges(skillId, jwt));
+    }}

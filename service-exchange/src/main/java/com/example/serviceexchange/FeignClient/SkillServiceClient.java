@@ -3,10 +3,9 @@ package com.example.serviceexchange.FeignClient;
 
 import com.example.serviceexchange.dto.SkillResponse;
 import org.springframework.cloud.openfeign.FeignClient;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @FeignClient(name = "service-skill", url = "${application.config.skill-url}")
 public interface SkillServiceClient {
@@ -20,4 +19,6 @@ public interface SkillServiceClient {
 
     @PostMapping("/{skillId}/decrement-inscrits")
     void decrementInscrits(@PathVariable Integer skillId, @RequestHeader("Authorization") String token);
+    @GetMapping("/api/v1/skills")
+    List<SkillResponse> getSkillsByUserId(@RequestParam("userId") Long userId, @RequestHeader("Authorization") String token);
 }

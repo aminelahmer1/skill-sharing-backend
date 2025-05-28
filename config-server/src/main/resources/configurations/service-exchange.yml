@@ -1,61 +1,78 @@
 server:
   port: 8084
-eureka:
-  client:
-    service-url:
-      defaultZone: http://localhost:8761/eureka/
+
 spring:
+  application:
+    name: service-exchange
+
   datasource:
     url: jdbc:postgresql://localhost:5432/SkillSharing_Exchange
-    username: postgres
-    password: admin
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:admin}
+    driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
       ddl-auto: update
     show-sql: true
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: http://localhost:9098/realms/skill-sharing
-          jwk-set-uri: http://localhost:9098/realms/skill-sharing/protocol/openid-connect/certs
-  # Configuration WebSocket
-  websocket:
-    allowed-origins: "http://localhost:4200" # Autorise les connexions depuis votre frontend
-  # Configuration Firebase
-
-  firebase:
-    credentials:
-      location: firebase-service-account.json
-
-keycloak:
-  auth-server-url: http://localhost:9098
-  realm: skill-sharing
-  client-id: backend-service
-  client-secret: wqKaJixE2KzSlyB7wIBqnS4DI3wQJKrz
-  admin-client-id: admin-cli
-  admin-username: admin
-  admin-password: admin
-
-application:
-  config:
-    user-url: http://localhost:8822/api/v1/users
-    skill-url: http://localhost:8822/api/v1/skills
-    # Configuration des notifications
-    notification:
-      websocket:
-        endpoint: /ws
-        broker-prefix: /topic
-        app-prefix: /app
-
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
 
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
     template:
       default-topic: notifications
 
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:9098}/realms/skill-sharing
+          jwk-set-uri: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:9098}/realms/skill-sharing/protocol/openid-connect/certs
+
+  websocket:
+    allowed-origins: ${FRONTEND_URL:http://localhost:4200}
+
+  firebase:
+    credentials:
+      location: ${FIREBASE_CREDENTIALS_PATH:firebase-service-account.json}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER:http://localhost:8761/eureka/}
   instance:
     prefer-ip-address: true
+
+keycloak:
+  auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:9098}
+  realm: skill-sharing
+  client-id: backend-service
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:wqKaJixE2KzSlyB7wIBqnS4DI3wQJKrz}
+  admin-client-id: admin-cli
+  admin-username: ${KEYCLOAK_ADMIN_USERNAME:admin}
+  admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}
+
+application:
+  config:
+    user-url: ${USER_SERVICE_URL:http://localhost:8822/api/v1/users}
+    skill-url: ${SKILL_SERVICE_URL:http://localhost:8822/api/v1/skills}
+    notification:
+      websocket:
+        endpoint: /ws
+        broker-prefix: /topic
+        app-prefix: /app
+
+logging:
+  level:
+    root: INFO
+    org.springframework: INFO
+    org.springframework.kafka: DEBUG
+    com.example.serviceexchange: DEBUG
+  file:
+    name: logs/service-exchange.log

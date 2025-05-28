@@ -24,4 +24,6 @@ public interface ExchangeRepository extends JpaRepository<Exchange, Integer> {
             @Param("producerId") Long producerId,
             @Param("receiverId") Long receiverId,
             @Param("skillId") Integer skillId);
+
+    List<Exchange> findByProducerIdAndStatus(Long producerId, String status);
 }
