@@ -43,6 +43,9 @@ public class Exchange {
     @Column(name = "streaming_date")
     private LocalDateTime streamingDate;
 
+
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
     public void setStatus(String status) {
         if (!ExchangeStatus.isValid(status)) {
             throw new InvalidStatusException("Invalid status: " + status);

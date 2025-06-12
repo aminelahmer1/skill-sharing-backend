@@ -4,7 +4,6 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
-
 import java.time.LocalDateTime;
 
 @Entity
@@ -20,10 +19,10 @@ public class Notification {
     private String type;
 
     @Column(name = "exchange_id")
-    private Integer exchangeId; // Changed to Integer
+    private Integer exchangeId;
 
     @Column(name = "user_id", nullable = false)
-    private Long userId;
+    private String userId; // Changed to String to match UUID
 
     @Column(nullable = false)
     private String message;
@@ -33,4 +32,7 @@ public class Notification {
 
     @Column(nullable = false)
     private boolean sent;
+
+    @Column(nullable = false)
+    private boolean read;
 }

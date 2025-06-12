@@ -2,11 +2,9 @@ package com.example.serviceexchange.controller;
 
 import com.example.serviceexchange.dto.ExchangeRequest;
 import com.example.serviceexchange.dto.ExchangeResponse;
-import com.example.serviceexchange.dto.SkillResponse;
 import com.example.serviceexchange.service.ExchangeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -43,12 +41,13 @@ public class ExchangeController {
     @PreAuthorize("hasRole('PRODUCER')")
     public ResponseEntity<ExchangeResponse> rejectExchange(
             @PathVariable Integer id,
-            @RequestParam(required = false) String reason,
+            @RequestBody(required = false) RejectReasonRequest reasonRequest,
             @AuthenticationPrincipal Jwt jwt
     ) {
+        String reason = reasonRequest != null ? reasonRequest.reason() : null;
         return ResponseEntity.ok(exchangeService.rejectExchange(id, reason, jwt));
     }
-
+    record RejectReasonRequest(String reason) {}
     @PostMapping("/{skillId}/start")
     @PreAuthorize("hasRole('PRODUCER')")
     public ResponseEntity<Void> startSession(
@@ -78,7 +77,7 @@ public class ExchangeController {
 
     @GetMapping("/pending")
     @PreAuthorize("hasRole('PRODUCER')")
-    public ResponseEntity<List<SkillResponse>> getPendingExchanges(
+    public ResponseEntity<List<ExchangeResponse>> getPendingExchanges(
             @AuthenticationPrincipal Jwt jwt
     ) {
         return ResponseEntity.ok(exchangeService.getPendingExchangesForProducer(jwt));
@@ -91,4 +90,5 @@ public class ExchangeController {
             @AuthenticationPrincipal Jwt jwt
     ) {
         return ResponseEntity.ok(exchangeService.acceptAllPendingExchanges(skillId, jwt));
-    }}
+    }
+}

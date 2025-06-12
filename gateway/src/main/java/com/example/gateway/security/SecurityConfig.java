@@ -31,12 +31,14 @@ public class SecurityConfig {
             "/uploads/**",
             "/skill-uploads/**",
             "/api/v1/auth/**",
-            "/api/v1/users/register"
-    };
+            "/api/v1/users/register",
+            "/ws/notifications/**"
 
+    };
     private static final String[] PRODUCER_RECEIVER_ENDPOINTS = {
             "/api/v1/skills/**",
-            "/api/v1/exchanges/**"
+            "/api/v1/exchanges/**",
+            "api/v1/notifications/**"
     };
 
     @Bean
@@ -62,9 +64,9 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(true);
         config.setAllowedOrigins(List.of("http://localhost:4200"));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE","PATCH", "OPTIONS"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("Authorization"));
+        config.setExposedHeaders(List.of("Authorization", "Content-Type"));
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

@@ -1,4 +1,4 @@
-package com.example.serviceuser.config;
+package com.example.serviceuser.configuration;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;

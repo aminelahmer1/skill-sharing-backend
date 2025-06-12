@@ -49,6 +49,23 @@ spring:
           filters:
             - RewritePath=/skill-uploads/(?<segment>.*), /skill-uploads/${segment}
 
+        - id: notification-service-http
+          uri: lb://notification-service
+          predicates:
+            - Path=/api/v1/notifications/**
+          filters:
+            - TokenRelay
+
+        - id: notification-service-websocket
+          uri: lb://notification-service
+          predicates:
+            - Path=/ws/notifications/**
+          filters:
+            - TokenRelay
+
+      default-filters:
+        - TokenRelay
+
   main:
     web-application-type: reactive
     allow-bean-definition-overriding: true
@@ -58,7 +75,6 @@ spring:
         jwt:
           issuer-uri: http://localhost:9098/realms/skill-sharing
           jwk-set-uri: http://localhost:9098/realms/skill-sharing/protocol/openid-connect/certs
-
 
 keycloak:
   auth-server-url: http://localhost:9098

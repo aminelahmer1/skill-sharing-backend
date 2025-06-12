@@ -7,15 +7,19 @@ import com.example.serviceexchange.entity.Exchange;
 import com.example.serviceexchange.entity.ExchangeStatus;
 import com.example.serviceexchange.exception.*;
 import com.example.serviceexchange.repository.ExchangeRepository;
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -38,6 +42,21 @@ public class ExchangeService {
     private static final String NO_PARTICIPANTS = "No accepted participants for this skill";
     private static final String NO_IN_PROGRESS_PARTICIPANTS = "No in-progress participants for this skill";
     private static final String NO_PENDING_EXCHANGES = "No pending exchanges found for this skill";
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public class SkillNotFoundException extends RuntimeException {
+        public SkillNotFoundException(String message) {
+            super(message);
+        }
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public class InvalidStateException extends RuntimeException {
+        public InvalidStateException(String message) {
+            super(message);
+        }
+    }
+
     @Transactional
     public ExchangeResponse createExchange(ExchangeRequest request, Jwt jwt) {
         String receiverToken = "Bearer " + jwt.getTokenValue();
@@ -57,11 +76,12 @@ public class ExchangeService {
                 .producerId(producer.id())
                 .receiverId(receiver.id())
                 .skillId(skill.id())
-                .status(ExchangeStatus.PENDING)
+                .status(ExchangeStatus.PENDING.toString())
                 .streamingDate(parseStreamingDateTime(skill))
                 .build();
 
         Exchange savedExchange = exchangeRepository.save(exchange);
+        log.info("Saved exchange ID: {}", savedExchange.getId());
 
         try {
             String producerToken = getProducerToken(producer.id(), receiverToken);
@@ -74,38 +94,73 @@ public class ExchangeService {
 
         notificationService.notifyNewRequest(producer, receiver, skill, savedExchange.getId());
 
-        return toResponse(savedExchange);
+        return toResponse(savedExchange, skill, receiver);
     }
+
 
     @Transactional
     public ExchangeResponse acceptExchange(Integer exchangeId, Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
+        log.info("Attempting to accept exchange ID: {}", exchangeId);
         Exchange exchange = getExchange(exchangeId);
+        log.info("Found exchange: {}", exchange);
         validateProducerAction(exchange, jwt, token);
+        log.info("Producer validated for exchange ID: {}", exchangeId);
 
-        SkillResponse skill = fetchSkill(exchange.getSkillId());
-        if (skill.nbInscrits() >= skill.availableQuantity()) {
-            throw new CapacityExceededException(NO_AVAILABLE_SLOTS);
+        if (!"PENDING".equals(exchange.getStatus())) {
+            log.warn("Exchange ID {} is not in PENDING state, current state: {}", exchangeId, exchange.getStatus());
+            throw new InvalidStateException("Exchange must be in PENDING state to accept");
         }
 
-        exchange.setStatus(ExchangeStatus.ACCEPTED);
+        SkillResponse skill = fetchSkill(exchange.getSkillId());
+        if (skill == null) {
+            log.warn("Skill ID {} not found for exchange ID {}", exchange.getSkillId(), exchangeId);
+            throw new SkillNotFoundException("Skill not found for exchange");
+        }
+        log.info("Fetched skill ID: {}, nbInscrits: {}, availableQuantity: {}", skill.id(), skill.nbInscrits(), skill.availableQuantity());
+
+        // Skip capacity check since PENDING exchange already reserved a slot
+        // Alternatively, validate that nbInscrits is consistent
+        if (skill.nbInscrits() > skill.availableQuantity()) {
+            log.error("Inconsistent state for skill ID {}: nbInscrits ({}) exceeds availableQuantity ({})",
+                    skill.id(), skill.nbInscrits(), skill.availableQuantity());
+            throw new CapacityExceededException("Skill capacity exceeded due to inconsistent registration count");
+        }
+
+        exchange.setStatus(ExchangeStatus.ACCEPTED.toString());
         Exchange updatedExchange = exchangeRepository.save(exchange);
+        log.info("Exchange ID {} updated to status: {}", updatedExchange.getId(), updatedExchange.getStatus());
 
         UserResponse producer = fetchUserById(exchange.getProducerId(), token);
         UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
         notificationService.notifyRequestAccepted(receiver, producer, skill, exchangeId);
+        log.info("Notification sent for accepted exchange ID: {}", exchangeId);
 
-        return toResponse(updatedExchange);
+        return toResponse(updatedExchange, skill, receiver);
     }
+
+
+
 
     @Transactional
     public ExchangeResponse rejectExchange(Integer exchangeId, String reason, Jwt jwt) {
         String producerToken = "Bearer " + jwt.getTokenValue();
+        log.info("Attempting to reject exchange ID: {}", exchangeId);
         Exchange exchange = getExchange(exchangeId);
+        log.info("Found exchange: {}", exchange);
         validateProducerAction(exchange, jwt, producerToken);
+        log.info("Producer validated for exchange ID: {}", exchangeId);
 
-        exchange.setStatus(ExchangeStatus.REJECTED);
+        if (!"PENDING".equals(exchange.getStatus())) {
+            log.warn("Exchange ID {} is not in PENDING state, current state: {}", exchangeId, exchange.getStatus());
+            throw new InvalidStateException("Exchange must be in PENDING state to reject");
+        }
+
+        exchange.setStatus(ExchangeStatus.REJECTED.toString());
+        exchange.setRejectionReason(reason); // Ensure rejection reason is set
         Exchange updatedExchange = exchangeRepository.save(exchange);
+        log.info("Exchange ID {} updated to status: {} with reason: {}", updatedExchange.getId(), updatedExchange.getStatus(), reason);
+        log.debug("Saved exchange with rejectionReason: {}", updatedExchange.getRejectionReason()); // Debug log
 
         try {
             String token = getProducerToken(exchange.getProducerId(), producerToken);
@@ -118,9 +173,14 @@ public class ExchangeService {
         UserResponse producer = fetchUserById(exchange.getProducerId(), producerToken);
         UserResponse receiver = fetchUserById(exchange.getReceiverId(), producerToken);
         SkillResponse skill = fetchSkill(exchange.getSkillId());
+        if (skill == null) {
+            log.warn("Skill ID {} not found for exchange ID {}, using default name for notification", exchange.getSkillId(), exchangeId);
+            skill = new SkillResponse(exchange.getSkillId(), "Deleted Skill", null, 0, null, 0, null, null, null, null, null, null, null);
+        }
         notificationService.notifyRequestRejected(receiver, producer, skill, reason, exchangeId);
+        log.info("Notification sent for rejected exchange ID: {}", exchangeId);
 
-        return toResponse(updatedExchange);
+        return toResponse(updatedExchange, skill, receiver);
     }
 
     @Transactional
@@ -128,21 +188,23 @@ public class ExchangeService {
         String token = "Bearer " + jwt.getTokenValue();
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
         SkillResponse skill = fetchSkill(skillId);
+        if (skill == null) {
+            log.warn("Skill ID {} not found", skillId);
+            throw new SkillNotFoundException("Skill not found");
+        }
 
         if (!user.id().equals(skill.userId())) {
             throw new AccessDeniedException(ONLY_PRODUCER_CAN_PERFORM_ACTION);
         }
 
-        List<Exchange> exchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.ACCEPTED);
-
+        List<Exchange> exchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.ACCEPTED.toString());
         if (exchanges.isEmpty()) {
             throw new NoParticipantsException(NO_PARTICIPANTS);
         }
 
         exchanges.forEach(exchange -> {
-            exchange.setStatus(ExchangeStatus.IN_PROGRESS);
+            exchange.setStatus(ExchangeStatus.IN_PROGRESS.toString());
             exchangeRepository.save(exchange);
-
             UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
             notificationService.notifySessionStarted(receiver, user, skillId, exchange.getId());
         });
@@ -153,31 +215,49 @@ public class ExchangeService {
         String token = "Bearer " + jwt.getTokenValue();
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
         SkillResponse skill = fetchSkill(skillId);
+        if (skill == null) {
+            log.warn("Skill ID {} not found", skillId);
+            throw new SkillNotFoundException("Skill not found");
+        }
 
         if (!user.id().equals(skill.userId())) {
             throw new AccessDeniedException(ONLY_PRODUCER_CAN_PERFORM_ACTION);
         }
 
-        List<Exchange> exchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.IN_PROGRESS);
-
+        List<Exchange> exchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.IN_PROGRESS.toString());
         if (exchanges.isEmpty()) {
             throw new NoParticipantsException(NO_IN_PROGRESS_PARTICIPANTS);
         }
 
         exchanges.forEach(exchange -> {
-            exchange.setStatus(ExchangeStatus.COMPLETED);
+            exchange.setStatus(ExchangeStatus.COMPLETED.toString());
             exchangeRepository.save(exchange);
-
             UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
             notificationService.notifySessionCompleted(receiver, user, skillId, exchange.getId());
         });
     }
 
+    @Transactional(readOnly = true)
     public List<ExchangeResponse> getUserExchanges(Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
-        return exchangeRepository.findUserExchanges(user.id()).stream()
-                .map(this::toResponse)
+        List<Exchange> exchanges = exchangeRepository.findUserExchanges(user.id());
+        if (exchanges.isEmpty()) {
+            log.info("No exchanges found for user ID: {}", user.id());
+            return List.of();
+        }
+
+        return exchanges.stream()
+                .map(exchange -> {
+                    SkillResponse skill = fetchSkill(exchange.getSkillId());
+                    if (skill == null) {
+                        log.warn("Skipping exchange ID {} due to unavailable skill ID {}", exchange.getId(), exchange.getSkillId());
+                        return null;
+                    }
+                    UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+                    return toResponse(exchange, skill, receiver);
+                })
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
@@ -210,9 +290,18 @@ public class ExchangeService {
     private SkillResponse fetchSkill(Integer skillId) {
         try {
             return skillServiceClient.getSkillById(skillId);
+        } catch (FeignException.NotFound e) {
+            log.warn("Skill ID {} not found", skillId);
+            return null; // Compétence non trouvée, on passe à l'échange suivant
+        } catch (FeignException.InternalServerError e) {
+            log.error("Internal server error fetching skill with ID {}: {}", skillId, e.getMessage());
+            return null; // Erreur interne, on passe à l'échange suivant
+        } catch (FeignException e) {
+            log.error("Error fetching skill with ID {}: status={}, message={}", skillId, e.status(), e.getMessage());
+            return null; // Autre erreur Feign, on passe à l'échange suivant
         } catch (Exception e) {
-            log.error("Failed to fetch skill with ID {}: {}", skillId, e.getMessage(), e);
-            throw e;
+            log.error("Unexpected error fetching skill with ID {}: {}", skillId, e.getMessage(), e);
+            throw new RuntimeException("Failed to fetch skill", e); // Erreur inattendue, on propage l'exception
         }
     }
 
@@ -253,27 +342,32 @@ public class ExchangeService {
 
     private SkillResponse validateSkill(ExchangeRequest request, UserResponse producer) {
         SkillResponse skill = fetchSkill(request.skillId());
+        if (skill == null) {
+            throw new SkillNotFoundException("Skill not found");
+        }
         if (!producer.id().equals(skill.userId())) {
             throw new InvalidExchangeException(SKILL_DOES_NOT_BELONG_TO_PRODUCER);
         }
         return skill;
     }
 
-    private ExchangeResponse toResponse(Exchange exchange) {
+    private ExchangeResponse toResponse(Exchange exchange, SkillResponse skill, UserResponse receiver) {
         return new ExchangeResponse(
                 exchange.getId(),
                 exchange.getProducerId(),
                 exchange.getReceiverId(),
                 exchange.getSkillId(),
-                exchange.getStatus().toString(),
+                exchange.getStatus(),
                 exchange.getCreatedAt(),
                 exchange.getUpdatedAt(),
                 exchange.getStreamingDate(),
                 exchange.getProducerRating(),
-                null
+                exchange.getRejectionReason(),
+                skill.name(),
+                receiver.firstName() + " " + receiver.lastName(),
+                skill.id()
         );
     }
-
     private String getProducerToken(Long producerId, String fallbackToken) {
         try {
             UserResponse producer = fetchUserById(producerId, fallbackToken);
@@ -287,49 +381,48 @@ public class ExchangeService {
             throw new RuntimeException("Unable to obtain producer token", e);
         }
     }
+
     @Transactional(readOnly = true)
-    public List<SkillResponse> getPendingExchangesForProducer(Jwt jwt) {
+    public List<ExchangeResponse> getPendingExchangesForProducer(Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
+        log.info("Fetching pending exchanges for producer ID: {}", user.id());
+        List<Exchange> pendingExchanges = exchangeRepository.findByProducerIdAndStatus(user.id(), ExchangeStatus.PENDING.toString());
+        log.info("Found {} pending exchanges", pendingExchanges.size());
 
-        if (!user.roles().contains("PRODUCER")) {
-            throw new AccessDeniedException(PRODUCER_MUST_HAVE_PRODUCER_ROLE);
-        }
-
-        // Fetch pending exchanges for the producer
-        List<Exchange> pendingExchanges = exchangeRepository.findByProducerIdAndStatus(user.id(), ExchangeStatus.PENDING);
-        if (pendingExchanges.isEmpty()) {
-            log.info("No pending exchanges found for producer ID: {}", user.id());
-            return List.of();
-        }
-
-        // Get unique skill IDs from pending exchanges
-        List<Integer> skillIds = pendingExchanges.stream()
-                .map(Exchange::getSkillId)
-                .distinct()
+        return pendingExchanges.stream()
+                .map(exchange -> {
+                    log.info("Processing exchange ID: {}", exchange.getId());
+                    SkillResponse skill = fetchSkill(exchange.getSkillId());
+                    if (skill == null) {
+                        log.warn("Skipping exchange ID {} due to unavailable skill ID: {}", exchange.getId(), exchange.getSkillId());
+                        return null;
+                    }
+                    UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+                    if (receiver == null) {
+                        log.warn("Skipping exchange ID {} due to unavailable receiver ID: {}", exchange.getId(), exchange.getReceiverId());
+                        return null;
+                    }
+                    return toResponse(exchange, skill, receiver);
+                })
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-
-        // Fetch skills for the identified skill IDs
-        List<SkillResponse> skills = skillIds.stream()
-                .map(skillId -> skillServiceClient.getSkillById(skillId))
-                .filter(skill -> skill.userId().equals(user.id())) // Ensure skills belong to the producer
-                .collect(Collectors.toList());
-
-        log.info("Found {} skills with pending exchanges for producer ID: {}", skills.size(), user.id());
-        return skills;
     }
-
     @Transactional
     public List<ExchangeResponse> acceptAllPendingExchanges(Integer skillId, Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
         SkillResponse skill = fetchSkill(skillId);
+        if (skill == null) {
+            log.warn("Skill ID {} not found", skillId);
+            throw new SkillNotFoundException("Skill not found");
+        }
 
         if (!user.id().equals(skill.userId())) {
             throw new AccessDeniedException(ONLY_PRODUCER_CAN_PERFORM_ACTION);
         }
 
-        List<Exchange> pendingExchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.PENDING);
+        List<Exchange> pendingExchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.PENDING.toString());
         if (pendingExchanges.isEmpty()) {
             throw new NoParticipantsException(NO_PENDING_EXCHANGES);
         }
@@ -341,18 +434,18 @@ public class ExchangeService {
         }
 
         List<ExchangeResponse> acceptedExchanges = pendingExchanges.stream().map(exchange -> {
-            exchange.setStatus(ExchangeStatus.ACCEPTED);
+            exchange.setStatus(ExchangeStatus.ACCEPTED.toString());
             Exchange updatedExchange = exchangeRepository.save(exchange);
+            log.info("Exchange ID {} updated to status: {}", updatedExchange.getId(), updatedExchange.getStatus());
 
             UserResponse producer = fetchUserById(exchange.getProducerId(), token);
             UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
             notificationService.notifyRequestAccepted(receiver, producer, skill, exchange.getId());
 
-            return toResponse(updatedExchange);
+            return toResponse(updatedExchange, skill, receiver);
         }).collect(Collectors.toList());
 
         log.info("Accepted {} pending exchanges for skill ID: {}", acceptedExchanges.size(), skillId);
         return acceptedExchanges;
     }
-
 }

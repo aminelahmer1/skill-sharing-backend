@@ -2,7 +2,7 @@ package com.example.serviceexchange.dto;
 
 import java.time.LocalDateTime;
 
-public record ExchangeResponse(
+public record ExchangeResponseDTO(
         Integer id,
         Long producerId,
         Long receiverId,
@@ -12,8 +12,6 @@ public record ExchangeResponse(
         LocalDateTime updatedAt,
         LocalDateTime streamingDate,
         Integer producerRating,
-        String rejectionReason,
         String skillName,
-        String receiverName,
-        Integer skillIdField
+        String receiverName
 ) {}
