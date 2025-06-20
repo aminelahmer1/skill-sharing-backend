@@ -1,9 +1,28 @@
+
+
 server:
   port: 8040
 
 spring:
   application:
     name: notification-service
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins: "http://localhost:4200"
+            allowed-methods: "*"
+            allowed-headers: "*"
+            allow-credentials: true
+            exposed-headers: "Authorization"
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9098/realms/skill-sharing
+          jwk-set-uri: http://localhost:9098/realms/skill-sharing/protocol/openid-connect/certs
 
   datasource:
     url: jdbc:postgresql://localhost:5432/SkillSharing_Notifications
@@ -74,3 +93,9 @@ logging:
     com.example.notification: DEBUG
   file:
     name: logs/notification-service.log
+
+notification:
+  websocket:
+    endpoint: /ws
+
+

@@ -32,13 +32,16 @@ public class SecurityConfig {
             "/skill-uploads/**",
             "/api/v1/auth/**",
             "/api/v1/users/register",
+            "/ws/notifications/info/**",
+            "/ws/notifications/websocket",
+            "api/v1/notifications/**",
             "/ws/notifications/**"
 
     };
     private static final String[] PRODUCER_RECEIVER_ENDPOINTS = {
             "/api/v1/skills/**",
             "/api/v1/exchanges/**",
-            "api/v1/notifications/**"
+
     };
 
     @Bean
@@ -49,6 +52,7 @@ public class SecurityConfig {
                 .authorizeExchange(exchange -> exchange
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers(PUBLIC_ENDPOINTS).permitAll()
+
                         .pathMatchers(PRODUCER_RECEIVER_ENDPOINTS).hasAnyRole("PRODUCER", "RECEIVER")
                         .pathMatchers("/api/v1/users/**").authenticated()
 

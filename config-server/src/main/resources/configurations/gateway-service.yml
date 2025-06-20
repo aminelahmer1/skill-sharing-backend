@@ -84,3 +84,7 @@ keycloak:
 
 server:
   port: 8822
+
+notification:
+  websocket:
+    endpoint: /ws
