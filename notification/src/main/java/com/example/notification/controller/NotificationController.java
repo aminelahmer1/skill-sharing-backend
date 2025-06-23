@@ -25,32 +25,40 @@ public class NotificationController {
     public ResponseEntity<List<Notification>> getUserNotifications(
             @PathVariable String userId,
             @AuthenticationPrincipal Jwt jwt) {
-        try {
-            String authenticatedUserId = jwt.getClaimAsString("sub");
-            if (!authenticatedUserId.equals(userId)) {
-                return ResponseEntity.status(403).build(); // Forbidden if userId mismatch
-            }
-            List<Notification> notifications = notificationService.getNotificationsByUserId(userId);
-            return notifications.isEmpty() ? ResponseEntity.noContent().build() : ResponseEntity.ok(notifications);
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
+        String authenticatedUserId = jwt.getClaimAsString("sub");
+        if (!authenticatedUserId.equals(userId)) {
+            return ResponseEntity.status(403).build();
         }
+        List<Notification> notifications = notificationService.getNotificationsByUserId(userId);
+        return notifications.isEmpty() ? ResponseEntity.noContent().build() : ResponseEntity.ok(notifications);
     }
 
     @PutMapping("/{id}/read")
     @PreAuthorize("hasRole('RECEIVER') or hasRole('PRODUCER')")
-    public ResponseEntity<Void> markNotificationAsRead(
+    public ResponseEntity<Notification> markNotificationAsRead(
             @PathVariable Long id,
             @AuthenticationPrincipal Jwt jwt) {
         try {
-            notificationService.markAsRead(id, jwt);
-            return ResponseEntity.ok().build();
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build(); // Invalid ID or notification
-        } catch (SecurityException e) {
-            return ResponseEntity.status(403).build(); // Unauthorized access
-        } catch (Exception e) {
+            Notification updated = notificationService.markAsRead(id, jwt);
+            return ResponseEntity.ok(updated);
+        } catch (RuntimeException e) {
+            if (e.getMessage().contains("non trouvée") || e.getMessage().contains("Non autorisé")) {
+                return ResponseEntity.status(403).build();
+            }
             return ResponseEntity.internalServerError().build();
         }
+    }
+
+    @PutMapping("/user/{userId}/mark-all-read")
+    @PreAuthorize("hasRole('RECEIVER') or hasRole('PRODUCER')")
+    public ResponseEntity<Void> markAllAsRead(
+            @PathVariable String userId,
+            @AuthenticationPrincipal Jwt jwt) {
+        String authenticatedUserId = jwt.getClaimAsString("sub");
+        if (!authenticatedUserId.equals(userId)) {
+            return ResponseEntity.status(403).build();
+        }
+        notificationService.markAllAsRead(userId);
+        return ResponseEntity.ok().build();
     }
 }

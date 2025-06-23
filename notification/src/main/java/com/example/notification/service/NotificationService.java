@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -61,7 +63,12 @@ public class NotificationService {
     private UserResponse fetchUser(Long userId) {
         try {
             String token = keycloakTokenService.getAccessToken();
-            return userServiceClient.getUserById(userId, token);
+            UserResponse user = userServiceClient.getUserById(userId, token);
+            if (user == null || user.keycloakId() == null || user.email() == null) {
+                log.error("Données utilisateur invalides pour userId: {}", userId);
+                return null;
+            }
+            return user;
         } catch (Exception e) {
             log.error("Erreur lors de la récupération de l'utilisateur avec l'ID {}: {}", userId, e.getMessage(), e);
             return null;
@@ -69,8 +76,14 @@ public class NotificationService {
     }
 
     private void sendNotification(UserResponse user, NotificationEvent event, String message, String subject) {
+        if (user == null || user.keycloakId() == null) {
+            log.error("User invalide pour l'envoi de notification");
+            return;
+        }
+
         Notification notification = createNotification(event, user.keycloakId(), message);
-        notificationRepository.save(notification);
+        notification = notificationRepository.save(notification);
+        log.info("Notification sauvegardée: {}", notification);
 
         messagingTemplate.convertAndSendToUser(user.keycloakId(), "/queue/notifications", notification);
 
@@ -82,9 +95,9 @@ public class NotificationService {
         try {
             mailSender.send(mailMessage);
             notification.setSent(true);
-            notification.setRead(false);
             notificationRepository.save(notification);
-            log.info("Notification envoyée à {} pour le type d'événement {}", user.email(), event.type());
+            log.info("Email envoyé à {} pour le type d'événement {}", user.email(), event.type());
+            messagingTemplate.convertAndSendToUser(user.keycloakId(), "/queue/notifications", notification);
         } catch (MailException e) {
             log.error("Échec de l'envoi de l'email à {} pour le type d'événement {}: {}", user.email(), event.type(), e.getMessage(), e);
         }
@@ -99,21 +112,44 @@ public class NotificationService {
         notification.setCreatedAt(LocalDateTime.now());
         notification.setSent(false);
         notification.setRead(false);
-        return notification;
+             return notification;
     }
 
     public List<Notification> getNotificationsByUserId(String userId) {
-        return notificationRepository.findByUserId(userId);
+        List<Notification> notifications = notificationRepository.findByUserId(userId);
+        List<Notification> filteredNotifications = notifications.stream()
+                .filter(Objects::nonNull)
+                .filter(n -> n.getId() != null && n.getUserId() != null && n.getMessage() != null && n.getCreatedAt() != null && n.getType() != null)
+                .collect(Collectors.toList());
+        log.info("Notifications filtrées pour userId {}: {}", userId, filteredNotifications);
+        return filteredNotifications;
     }
 
-    public void markAsRead(Long id, Jwt jwt) {
+    public Notification markAsRead(Long id, Jwt jwt) {
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Notification non trouvée"));
+
         String authenticatedUserId = jwt.getClaimAsString("sub");
         if (!authenticatedUserId.equals(notification.getUserId())) {
             throw new RuntimeException("Non autorisé à marquer cette notification comme lue");
         }
+
         notification.setRead(true);
-        notificationRepository.save(notification);
+        Notification updated = notificationRepository.save(notification);
+        log.info("Notification marquée comme lue: {}", updated);
+        messagingTemplate.convertAndSendToUser(authenticatedUserId, "/queue/notifications", updated);
+        return updated;
+    }
+
+    public void markAllAsRead(String userId) {
+        List<Notification> notifications = notificationRepository.findByUserId(userId);
+        for (Notification notification : notifications.stream().filter(Objects::nonNull).toList()) {
+            if (!notification.isRead()) {
+                notification.setRead(true);
+                Notification updated = notificationRepository.save(notification);
+                log.info("Notification marquée comme lue dans markAllAsRead: {}", updated);
+                messagingTemplate.convertAndSendToUser(userId, "/queue/notifications", updated);
+            }
+        }
     }
 }

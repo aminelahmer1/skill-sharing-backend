@@ -8,5 +8,6 @@ public record NotificationEvent(
         String skillName,
         String reason,
         String streamingDate
+
 ) {
 }
