@@ -30,19 +30,21 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .csrf(csrf -> csrf
+                        .ignoringRequestMatchers("/ws/**")
+                )
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/ws/notifications/**").permitAll()
+                        .requestMatchers("/ws/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt
                                 .decoder(jwtDecoder())
-                                .jwtAuthenticationConverter(jwtAuthenticationConverter()) // ✅ Ajouté ici
+                                .jwtAuthenticationConverter(jwtAuthenticationConverter())
                         )
                 );
         return http.build();
     }
-
 
     @Bean
     public JwtDecoder jwtDecoder() {

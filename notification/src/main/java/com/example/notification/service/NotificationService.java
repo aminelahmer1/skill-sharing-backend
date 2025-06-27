@@ -45,9 +45,11 @@ public class NotificationService {
             return;
         }
 
+        String receiverFullName = receiver.firstName() + " " + receiver.lastName();
+
         switch (event.type()) {
             case "EXCHANGE_CREATED":
-                sendNotification(producer, event, String.format("Le receveur %s a demandé à rejoindre votre compétence %s.", receiver.username(), event.skillName()), "Notification de Partage de Compétence");
+                sendNotification(producer, event, String.format("Le receveur %s a demandé à rejoindre votre compétence %s.", receiverFullName, event.skillName()), "Notification de Partage de Compétence");
                 break;
             case "EXCHANGE_ACCEPTED":
                 sendNotification(receiver, event, String.format("Votre demande pour la compétence %s a été acceptée.", event.skillName()), "Notification de Partage de Compétence");
@@ -112,7 +114,7 @@ public class NotificationService {
         notification.setCreatedAt(LocalDateTime.now());
         notification.setSent(false);
         notification.setRead(false);
-             return notification;
+        return notification;
     }
 
     public List<Notification> getNotificationsByUserId(String userId) {

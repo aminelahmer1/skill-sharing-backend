@@ -61,10 +61,7 @@ spring:
           predicates:
             - Path=/ws/notifications/**
           filters:
-            - TokenRelay
-
-      default-filters:
-        - TokenRelay
+            -  RewritePath=/ws/notifications, /ws/notifications
 
   main:
     web-application-type: reactive
