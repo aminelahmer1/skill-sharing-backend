@@ -39,3 +39,4 @@ mvnw.cmd
 # Sensitive files
 service-exchange/src/main/resources/firebase-service-account.json
 skill-uploads/"service-livestream/src/main/resources/firebase-service-account.json" 
+service-livestream/src/main/resources/firebase-service-account.json
