@@ -1,0 +1,209 @@
+server:
+  port: 8085
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/SkillSharing_Livestream
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:admin}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      leak-detection-threshold: 60000
+
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins: "http://localhost:4200"
+            allowed-methods: "*"
+            allowed-headers: "*"
+            allow-credentials: true
+            exposed-headers: "Authorization"
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9098/realms/skill-sharing
+          jwk-set-uri: http://localhost:9098/realms/skill-sharing/protocol/openid-connect/certs
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      batch-size: 16384
+      linger-ms: 5
+      retries: 3
+    consumer:
+      group-id: livestream-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+    template:
+      default-topic: livestream-notifications
+
+  websocket:
+    allowed-origins: ${FRONTEND_URL:http://localhost:4200}
+
+  firebase:
+    credentials:
+      location: ${FIREBASE_CREDENTIALS_PATH:firebase-service-account.json}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER:http://localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${spring.application.instance_id:${random.value}}
+
+# Configuration LiveKit
+livekit:
+  url: ${LIVEKIT_URL:ws://localhost:7880}
+  api-key: ${LIVEKIT_API_KEY:APIhxK9mPqR2vF8sN3cL}
+  api-secret: ${LIVEKIT_API_SECRET:7nM9xP4qR8sW2vF6yH3kL5nC9pT1uE8mB4gD7jK0}
+  server-url: ${LIVEKIT_SERVER_URL:http://localhost:7880}
+  room:
+    max-participants: ${LIVEKIT_MAX_PARTICIPANTS:50}
+    empty-timeout: ${LIVEKIT_EMPTY_TIMEOUT:300}
+    max-duration: ${LIVEKIT_MAX_DURATION:3600}
+  token:
+    ttl: ${LIVEKIT_TOKEN_TTL:86400} # 24 heures en secondes
+    publisher-ttl: ${LIVEKIT_PUBLISHER_TTL:172800} # 48 heures pour les publishers
+  recording:
+    enabled: ${LIVEKIT_RECORDING_ENABLED:true}
+    storage-path: ${LIVEKIT_RECORDING_PATH:./recordings}
+    max-size: ${LIVEKIT_RECORDING_MAX_SIZE:1GB}
+    format: ${LIVEKIT_RECORDING_FORMAT:mp4}
+
+# Configuration Firebase
+firebase:
+  credentials:
+    path: ${FIREBASE_CREDENTIALS_PATH:classpath:firebase-service-account.json}
+  messaging:
+    enabled: ${FIREBASE_MESSAGING_ENABLED:true}
+
+# Configuration Keycloak
+keycloak:
+  auth-server-url: http://localhost:9098
+  realm: skill-sharing
+  client-id: backend-service
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:ifUlRmmtEfu02d80iz06MroNHC5kVuKf}
+  ssl-required: none
+  public-client: false
+  verify-token-audience: true
+
+# Configuration de l'application
+application:
+  config:
+    user-url: ${USER_SERVICE_URL:http://localhost:8081/api/v1/users}
+    skill-url: ${SKILL_SERVICE_URL:http://localhost:8050/api/v1/skills}
+    exchange-url: ${EXCHANGE_SERVICE_URL:http://localhost:8084/api/v1/exchanges}
+    notification-url: ${NOTIFICATION_SERVICE_URL:http://localhost:8083/api/v1/notifications}
+
+  # Configuration des streams
+  streaming:
+    max-concurrent-streams: ${MAX_CONCURRENT_STREAMS:100}
+    stream-timeout: ${STREAM_TIMEOUT:7200} # 2 heures
+    reconnection-attempts: ${RECONNECTION_ATTEMPTS:3}
+    quality-levels:
+      - name: "low"
+        width: 640
+        height: 360
+        bitrate: 500
+      - name: "medium"
+        width: 1280
+        height: 720
+        bitrate: 1500
+      - name: "high"
+        width: 1920
+        height: 1080
+        bitrate: 3000
+
+  # Configuration des enregistrements
+  recording:
+    directory: ${RECORDING_DIRECTORY:./recordings}
+    max-size: ${RECORDING_MAX_SIZE:500MB}
+    retention-days: ${RECORDING_RETENTION:30}
+    auto-cleanup: ${RECORDING_AUTO_CLEANUP:true}
+    formats:
+      - mp4
+      - webm
+
+  # Configuration des notifications
+  notifications:
+    stream-start: ${NOTIFY_STREAM_START:true}
+    stream-end: ${NOTIFY_STREAM_END:true}
+    participant-join: ${NOTIFY_PARTICIPANT_JOIN:false}
+    participant-leave: ${NOTIFY_PARTICIPANT_LEAVE:false}
+    batch-size: ${NOTIFICATION_BATCH_SIZE:10}
+
+# Configuration du logging
+logging:
+  level:
+    root: INFO
+    org.springframework: INFO
+    org.springframework.kafka: DEBUG
+    org.springframework.security: DEBUG
+    com.example.servicelivestream: DEBUG
+    io.livekit: DEBUG
+  file:
+    name: logs/service-livestream.log
+    max-size: 10MB
+    max-history: 30
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Configuration de la gestion des erreurs
+resilience4j:
+  retry:
+    instances:
+      livekit-api:
+        maxAttempts: 3
+        waitDuration: 1000ms
+        retryExceptions:
+          - java.net.ConnectException
+          - java.net.SocketTimeoutException
+  circuit-breaker:
+    instances:
+      livekit-service:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+
+# Configuration des métriques
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true

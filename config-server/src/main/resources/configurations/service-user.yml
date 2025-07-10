@@ -40,7 +40,7 @@ keycloak:
   auth-server-url: http://localhost:9098
   realm: skill-sharing
   client-id: backend-service
-  client-secret: wqKaJixE2KzSlyB7wIBqnS4DI3wQJKrz
+  client-secret: ifUlRmmtEfu02d80iz06MroNHC5kVuKf
   admin-client-id: admin-cli
   admin-username: admin
   admin-password: admin

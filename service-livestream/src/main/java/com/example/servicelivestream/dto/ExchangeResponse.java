@@ -1,8 +1,9 @@
-package com.example.serviceexchange.dto;
+package com.example.servicelivestream.dto;
+
 
 import java.time.LocalDateTime;
 
-public record ExchangeResponseDTO(
+public record ExchangeResponse(
         Integer id,
         Long producerId,
         Long receiverId,
@@ -12,6 +13,8 @@ public record ExchangeResponseDTO(
         LocalDateTime updatedAt,
         LocalDateTime streamingDate,
         Integer producerRating,
+        String rejectionReason,
         String skillName,
-        String receiverName
+        String receiverName,
+        Integer skillIdField
 ) {}

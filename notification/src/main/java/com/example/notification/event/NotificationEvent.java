@@ -1,4 +1,4 @@
-package com.example.notification.dto;
+package com.example.notification.event;
 
 public record NotificationEvent(
         String type,

@@ -40,23 +40,23 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
 
+
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
       group-id: notification-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
-        spring.json.trusted.packages: com.example.notification.event,com.example.serviceexchange.dto
-    template:
-      default-topic: notifications
-
+        spring.json.trusted.packages: "com.example.servicelivestream.dto,com.example.notification.event,com.example.serviceexchange.dto,java.util,java.lang"
+        spring.json.value.default.type: com.example.notification.event.NotificationEvent
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
   mail:
     host: smtp.gmail.com
     port: 587
     username: contact.skillsharing@gmail.com
-    password: ifgxdvzotonorvzz
+    password: ielc sgww ljpc besx
     properties:
       mail:
         smtp:
@@ -80,7 +80,7 @@ keycloak:
   auth-server-url: http://localhost:9098
   realm: skill-sharing
   client-id: backend-service
-  client-secret: wqKaJixE2KzSlyB7wIBqnS4DI3wQJKrz
+  client-secret: ifUlRmmtEfu02d80iz06MroNHC5kVuKf
 
 logging:
   level:

@@ -1,0 +1,57 @@
+
+  server:
+    port: 8086
+
+  spring:
+    application:
+      name: service-messagerie
+    datasource:
+      url: jdbc:postgresql://localhost:5432/SkillSharing_Livestream
+      username: ${DB_USERNAME:postgres}
+      password: ${DB_PASSWORD:admin}
+      driver-class-name: org.postgresql.Driver
+      hikari:
+        connection-timeout: 20000
+        maximum-pool-size: 10
+    jpa:
+      hibernate:
+        ddl-auto: update
+      show-sql: true
+      open-in-view: false
+      properties:
+        hibernate:
+          dialect: org.hibernate.dialect.PostgreSQLDialect
+          format_sql: true
+    security:
+      oauth2:
+        resourceserver:
+          jwt:
+            issuer-uri: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:9098}/realms/skill-sharing
+            jwk-set-uri: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:9098}/realms/skill-sharing/protocol/openid-connect/certs
+    websocket:
+      allowed-origins: ${FRONTEND_URL:http://localhost:4200}
+    firebase:
+      credentials:
+        location: ${FIREBASE_CREDENTIALS_PATH:firebase-service-account.json}
+
+  eureka:
+    client:
+      service-url:
+        defaultZone: ${EUREKA_SERVER:http://localhost:8761/eureka/}
+    instance:
+      hostname: localhost
+      prefer-ip-address: true
+
+  application:
+    config:
+      user-url: ${USER_SERVICE_URL:http://localhost:8081/api/v1/users}
+
+  logging:
+    level:
+      root: INFO
+      org.springframework: INFO
+      com.example.servicemessagerie: DEBUG
+      com.example.servicemessagerie.feignclient: DEBUG
+      org.springframework.cloud.openfeign: DEBUG
+    file:
+      name: logs/service-messagerie.log

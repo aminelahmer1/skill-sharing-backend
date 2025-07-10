@@ -18,8 +18,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,8 +41,6 @@ public class ExchangeService {
     private static final String SKILL_DOES_NOT_BELONG_TO_PRODUCER = "Skill does not belong to the producer";
     private static final String NO_AVAILABLE_SLOTS = "No available slots for this skill";
     private static final String EXCHANGE_NOT_FOUND = "Exchange not found";
-    private static final String NO_PARTICIPANTS = "No accepted participants for this skill";
-    private static final String NO_IN_PROGRESS_PARTICIPANTS = "No in-progress participants for this skill";
     private static final String NO_PENDING_EXCHANGES = "No pending exchanges found for this skill";
 
     @ResponseStatus(HttpStatus.NOT_FOUND)
@@ -55,6 +55,78 @@ public class ExchangeService {
         public InvalidStateException(String message) {
             super(message);
         }
+    }
+
+    private UserResponse getAuthenticatedUser(Jwt jwt) {
+        String keycloakId = jwt.getSubject();
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse user = userServiceClient.getUserByKeycloakId(keycloakId, token);
+
+        if (user == null) {
+            throw new RuntimeException("User not found for Keycloak ID: " + keycloakId);
+        }
+
+        return user;
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserResponse> getAcceptedReceiversForSkill(Integer skillId, Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse producer = getAuthenticatedUser(jwt);
+
+        // Vérifier que la compétence appartient au producteur
+        SkillResponse skill = fetchSkill(skillId);
+        if (skill == null) {
+            throw new SkillNotFoundException("Skill not found with ID: " + skillId);
+        }
+        if (!producer.id().equals(skill.userId())) {
+            throw new AccessDeniedException("Only the skill producer can view accepted receivers");
+        }
+
+        // Récupérer les échanges ACCEPTED pour cette compétence
+        List<Exchange> acceptedExchanges = exchangeRepository.findBySkillIdAndStatus(
+                skillId,
+                ExchangeStatus.ACCEPTED.toString()
+        );
+
+        // Collecter les IDs des receivers
+        Set<Long> receiverIds = acceptedExchanges.stream()
+                .map(Exchange::getReceiverId)
+                .collect(Collectors.toSet());
+
+        // Récupérer les détails des receivers
+        List<UserResponse> receivers = new ArrayList<>();
+        for (Long receiverId : receiverIds) {
+            try {
+                UserResponse receiver = fetchUserById(receiverId, token);
+                receivers.add(receiver);
+            } catch (Exception e) {
+                log.error("Failed to fetch user with ID {}: {}", receiverId, e.getMessage());
+            }
+        }
+
+        return receivers;
+    }
+
+    @Transactional(readOnly = true)
+    public List<SkillResponse> getAcceptedSkillsForReceiver(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse receiver = getAuthenticatedUser(jwt);
+        log.info("Fetching accepted skills for receiver ID: {}", receiver.id());
+
+        List<Exchange> acceptedExchanges = exchangeRepository.findByReceiverIdAndStatus(
+                receiver.id(), ExchangeStatus.ACCEPTED.toString()
+        );
+
+        if (acceptedExchanges.isEmpty()) {
+            log.info("No accepted exchanges found for receiver ID: {}", receiver.id());
+            return List.of();
+        }
+
+        return acceptedExchanges.stream()
+                .map(exchange -> fetchSkill(exchange.getSkillId()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
     }
 
     @Transactional
@@ -96,7 +168,6 @@ public class ExchangeService {
 
         return toResponse(savedExchange, skill, receiver);
     }
-
 
     @Transactional
     public ExchangeResponse acceptExchange(Integer exchangeId, Jwt jwt) {
@@ -140,8 +211,6 @@ public class ExchangeService {
     }
 
 
-
-
     @Transactional
     public ExchangeResponse rejectExchange(Integer exchangeId, String reason, Jwt jwt) {
         String producerToken = "Bearer " + jwt.getTokenValue();
@@ -182,61 +251,6 @@ public class ExchangeService {
 
         return toResponse(updatedExchange, skill, receiver);
     }
-
-    @Transactional
-    public void startSession(Integer skillId, Jwt jwt) {
-        String token = "Bearer " + jwt.getTokenValue();
-        UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
-        SkillResponse skill = fetchSkill(skillId);
-        if (skill == null) {
-            log.warn("Skill ID {} not found", skillId);
-            throw new SkillNotFoundException("Skill not found");
-        }
-
-        if (!user.id().equals(skill.userId())) {
-            throw new AccessDeniedException(ONLY_PRODUCER_CAN_PERFORM_ACTION);
-        }
-
-        List<Exchange> exchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.ACCEPTED.toString());
-        if (exchanges.isEmpty()) {
-            throw new NoParticipantsException(NO_PARTICIPANTS);
-        }
-
-        exchanges.forEach(exchange -> {
-            exchange.setStatus(ExchangeStatus.IN_PROGRESS.toString());
-            exchangeRepository.save(exchange);
-            UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
-            notificationService.notifySessionStarted(receiver, user, skillId, exchange.getId());
-        });
-    }
-
-    @Transactional
-    public void completeSession(Integer skillId, Jwt jwt) {
-        String token = "Bearer " + jwt.getTokenValue();
-        UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
-        SkillResponse skill = fetchSkill(skillId);
-        if (skill == null) {
-            log.warn("Skill ID {} not found", skillId);
-            throw new SkillNotFoundException("Skill not found");
-        }
-
-        if (!user.id().equals(skill.userId())) {
-            throw new AccessDeniedException(ONLY_PRODUCER_CAN_PERFORM_ACTION);
-        }
-
-        List<Exchange> exchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.IN_PROGRESS.toString());
-        if (exchanges.isEmpty()) {
-            throw new NoParticipantsException(NO_IN_PROGRESS_PARTICIPANTS);
-        }
-
-        exchanges.forEach(exchange -> {
-            exchange.setStatus(ExchangeStatus.COMPLETED.toString());
-            exchangeRepository.save(exchange);
-            UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
-            notificationService.notifySessionCompleted(receiver, user, skillId, exchange.getId());
-        });
-    }
-
     @Transactional(readOnly = true)
     public List<ExchangeResponse> getUserExchanges(Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
@@ -255,6 +269,174 @@ public class ExchangeService {
                         return null;
                     }
                     UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+                    return toResponse(exchange, skill, receiver);
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ExchangeResponse> getPendingExchangesForProducer(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
+        log.info("Fetching pending exchanges for producer ID: {}", user.id());
+        List<Exchange> pendingExchanges = exchangeRepository.findByProducerIdAndStatus(user.id(), ExchangeStatus.PENDING.toString());
+        log.info("Found {} pending exchanges", pendingExchanges.size());
+
+        return pendingExchanges.stream()
+                .map(exchange -> {
+                    log.info("Processing exchange ID: {}", exchange.getId());
+                    SkillResponse skill = fetchSkill(exchange.getSkillId());
+                    if (skill == null) {
+                        log.warn("Skipping exchange ID {} due to unavailable skill ID: {}", exchange.getId(), exchange.getSkillId());
+                        return null;
+                    }
+                    UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+                    if (receiver == null) {
+                        log.warn("Skipping exchange ID {} due to unavailable receiver ID: {}", exchange.getId(), exchange.getReceiverId());
+                        return null;
+                    }
+                    return toResponse(exchange, skill, receiver);
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public List<ExchangeResponse> acceptAllPendingExchanges(Integer skillId, Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
+        SkillResponse skill = fetchSkill(skillId);
+        if (skill == null) {
+            log.warn("Skill ID {} not found", skillId);
+            throw new SkillNotFoundException("Skill not found");
+        }
+
+        if (!user.id().equals(skill.userId())) {
+            throw new AccessDeniedException(ONLY_PRODUCER_CAN_PERFORM_ACTION);
+        }
+
+        List<Exchange> pendingExchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.PENDING.toString());
+        if (pendingExchanges.isEmpty()) {
+            throw new NoParticipantsException(NO_PENDING_EXCHANGES);
+        }
+
+        int availableSlots = skill.availableQuantity() - skill.nbInscrits();
+        if (availableSlots < pendingExchanges.size()) {
+            throw new CapacityExceededException(String.format(
+                    "Not enough slots available: %d needed, %d available", pendingExchanges.size(), availableSlots));
+        }
+
+        List<ExchangeResponse> acceptedExchanges = pendingExchanges.stream().map(exchange -> {
+            // CORRECTION: Utilisation de la nouvelle signature
+            exchangeValidator.validateStatusTransition(exchange, ExchangeStatus.ACCEPTED.toString());
+
+            exchange.setStatus(ExchangeStatus.ACCEPTED.toString());
+            Exchange updatedExchange = exchangeRepository.save(exchange);
+            log.info("Exchange ID {} updated to status: {}", updatedExchange.getId(), updatedExchange.getStatus());
+
+            UserResponse producer = fetchUserById(exchange.getProducerId(), token);
+            UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+            notificationService.notifyRequestAccepted(receiver, producer, skill, exchange.getId());
+
+            return toResponse(updatedExchange, skill, receiver);
+        }).collect(Collectors.toList());
+
+        log.info("Accepted {} pending exchanges for skill ID: {}", acceptedExchanges.size(), skillId);
+        return acceptedExchanges;
+    }
+    @Transactional
+    public void updateStatus(Integer exchangeId, String status, Jwt jwt) {
+        Exchange exchange = getExchange(exchangeId);
+        String token = "Bearer " + jwt.getTokenValue();
+
+        // Récupérer les rôles de l'utilisateur
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        boolean isServiceAccount = roles != null && roles.contains("SERVICE_ACCOUNT");
+
+        // Valider l'utilisateur
+        if (!isServiceAccount) {
+            UserResponse user = getAuthenticatedUser(jwt);
+            if (!user.id().equals(exchange.getProducerId())) {
+                throw new AccessDeniedException("Only the producer can update the exchange status");
+            }
+        }
+
+        // CORRECTION: Utilisation de la nouvelle signature
+        exchangeValidator.validateStatusTransition(exchange, status);
+
+        // Mettre à jour le statut
+        exchange.setStatus(status);
+        exchangeRepository.save(exchange);
+        log.info("Exchange ID {} status updated to {}", exchangeId, status);
+
+        // Envoyer les notifications seulement pour les comptes utilisateurs normaux
+        if (!isServiceAccount) {
+            SkillResponse skill = fetchSkill(exchange.getSkillId());
+            UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+            UserResponse producer = fetchUserById(exchange.getProducerId(), token);
+
+            sendStatusNotification(status, receiver, producer, skill, exchange);
+        }
+    }
+    private void sendStatusNotification(String status, UserResponse receiver,
+                                        UserResponse producer, SkillResponse skill,
+                                        Exchange exchange) { // CORRECTION: Ajouter le paramètre Exchange
+        switch (status) {
+            case "ACCEPTED":
+                notificationService.notifyRequestAccepted(receiver, producer, skill, exchange.getId());
+                break;
+            case "REJECTED":
+                // CORRECTION: Utiliser exchange.getRejectionReason()
+                notificationService.notifyRequestRejected(receiver, producer, skill, exchange.getRejectionReason(), exchange.getId());
+                break;
+            case "SCHEDULED":
+                notificationService.notifySessionScheduled(receiver, producer, skill, exchange.getId());
+                break;
+            case "IN_PROGRESS":
+                notificationService.notifySessionStarted(receiver, producer, skill, exchange.getId());
+                break;
+            case "COMPLETED":
+                notificationService.notifySessionCompleted(receiver, producer, skill, exchange.getId());
+                break;
+            default:
+                log.warn("No notification defined for status: {}", status);
+        }
+    }
+    @Transactional(readOnly = true)
+    public List<ExchangeResponse> getExchangesBySkillId(Integer skillId, Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse user = getAuthenticatedUser(jwt);
+
+        // Verify that the skill exists
+        SkillResponse skill = fetchSkill(skillId);
+        if (skill == null) {
+            log.warn("Skill ID {} not found", skillId);
+            throw new SkillNotFoundException("Skill not found");
+        }
+
+        // Verify that the user is either the producer or a receiver of an exchange for this skill
+        Long userId = user.id();
+        if (!userId.equals(skill.userId()) && !exchangeRepository.findBySkillIdAndReceiverId(skillId, userId).isPresent()) {
+            log.warn("User ID {} is not authorized to view exchanges for skill ID {}", userId, skillId);
+            throw new AccessDeniedException("User is not authorized to view exchanges for this skill");
+        }
+
+        // Fetch exchanges for the skill where the user is either the producer or receiver
+        List<Exchange> exchanges = exchangeRepository.findBySkillIdAndUserId(skillId, userId);
+        if (exchanges.isEmpty()) {
+            log.info("No exchanges found for skill ID: {} and user ID: {}", skillId, userId);
+            return List.of();
+        }
+
+        // Map exchanges to ExchangeResponse DTOs
+        return exchanges.stream()
+                .map(exchange -> {
+                    UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+                    if (receiver == null) {
+                        log.warn("Skipping exchange ID {} due to unavailable receiver ID: {}", exchange.getId(), exchange.getReceiverId());
+                        return null;
+                    }
                     return toResponse(exchange, skill, receiver);
                 })
                 .filter(Objects::nonNull)
@@ -292,16 +474,16 @@ public class ExchangeService {
             return skillServiceClient.getSkillById(skillId);
         } catch (FeignException.NotFound e) {
             log.warn("Skill ID {} not found", skillId);
-            return null; // Compétence non trouvée, on passe à l'échange suivant
+            return null;
         } catch (FeignException.InternalServerError e) {
             log.error("Internal server error fetching skill with ID {}: {}", skillId, e.getMessage());
-            return null; // Erreur interne, on passe à l'échange suivant
+            return null;
         } catch (FeignException e) {
             log.error("Error fetching skill with ID {}: status={}, message={}", skillId, e.status(), e.getMessage());
-            return null; // Autre erreur Feign, on passe à l'échange suivant
+            return null;
         } catch (Exception e) {
             log.error("Unexpected error fetching skill with ID {}: {}", skillId, e.getMessage(), e);
-            throw new RuntimeException("Failed to fetch skill", e); // Erreur inattendue, on propage l'exception
+            throw new RuntimeException("Failed to fetch skill", e);
         }
     }
 
@@ -368,6 +550,7 @@ public class ExchangeService {
                 skill.id()
         );
     }
+
     private String getProducerToken(Long producerId, String fallbackToken) {
         try {
             UserResponse producer = fetchUserById(producerId, fallbackToken);
@@ -380,72 +563,5 @@ public class ExchangeService {
             log.error("Failed to obtain producer token for producer ID {}: {}", producerId, e.getMessage(), e);
             throw new RuntimeException("Unable to obtain producer token", e);
         }
-    }
-
-    @Transactional(readOnly = true)
-    public List<ExchangeResponse> getPendingExchangesForProducer(Jwt jwt) {
-        String token = "Bearer " + jwt.getTokenValue();
-        UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
-        log.info("Fetching pending exchanges for producer ID: {}", user.id());
-        List<Exchange> pendingExchanges = exchangeRepository.findByProducerIdAndStatus(user.id(), ExchangeStatus.PENDING.toString());
-        log.info("Found {} pending exchanges", pendingExchanges.size());
-
-        return pendingExchanges.stream()
-                .map(exchange -> {
-                    log.info("Processing exchange ID: {}", exchange.getId());
-                    SkillResponse skill = fetchSkill(exchange.getSkillId());
-                    if (skill == null) {
-                        log.warn("Skipping exchange ID {} due to unavailable skill ID: {}", exchange.getId(), exchange.getSkillId());
-                        return null;
-                    }
-                    UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
-                    if (receiver == null) {
-                        log.warn("Skipping exchange ID {} due to unavailable receiver ID: {}", exchange.getId(), exchange.getReceiverId());
-                        return null;
-                    }
-                    return toResponse(exchange, skill, receiver);
-                })
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-    }
-    @Transactional
-    public List<ExchangeResponse> acceptAllPendingExchanges(Integer skillId, Jwt jwt) {
-        String token = "Bearer " + jwt.getTokenValue();
-        UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), token);
-        SkillResponse skill = fetchSkill(skillId);
-        if (skill == null) {
-            log.warn("Skill ID {} not found", skillId);
-            throw new SkillNotFoundException("Skill not found");
-        }
-
-        if (!user.id().equals(skill.userId())) {
-            throw new AccessDeniedException(ONLY_PRODUCER_CAN_PERFORM_ACTION);
-        }
-
-        List<Exchange> pendingExchanges = exchangeRepository.findBySkillIdAndStatus(skillId, ExchangeStatus.PENDING.toString());
-        if (pendingExchanges.isEmpty()) {
-            throw new NoParticipantsException(NO_PENDING_EXCHANGES);
-        }
-
-        int availableSlots = skill.availableQuantity() - skill.nbInscrits();
-        if (availableSlots < pendingExchanges.size()) {
-            throw new CapacityExceededException(String.format(
-                    "Not enough slots available: %d needed, %d available", pendingExchanges.size(), availableSlots));
-        }
-
-        List<ExchangeResponse> acceptedExchanges = pendingExchanges.stream().map(exchange -> {
-            exchange.setStatus(ExchangeStatus.ACCEPTED.toString());
-            Exchange updatedExchange = exchangeRepository.save(exchange);
-            log.info("Exchange ID {} updated to status: {}", updatedExchange.getId(), updatedExchange.getStatus());
-
-            UserResponse producer = fetchUserById(exchange.getProducerId(), token);
-            UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
-            notificationService.notifyRequestAccepted(receiver, producer, skill, exchange.getId());
-
-            return toResponse(updatedExchange, skill, receiver);
-        }).collect(Collectors.toList());
-
-        log.info("Accepted {} pending exchanges for skill ID: {}", acceptedExchanges.size(), skillId);
-        return acceptedExchanges;
     }
 }

@@ -85,4 +85,5 @@ public class SecurityConfig {
             return Mono.just(converter.convert(jwt));
         };
     }
+
 }

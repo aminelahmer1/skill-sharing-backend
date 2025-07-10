@@ -62,6 +62,21 @@ spring:
             - Path=/ws/notifications/**
           filters:
             -  RewritePath=/ws/notifications, /ws/notifications
+        - id: service-livestream-http
+          uri: lb://SERVICE-LIVESTREAM
+          predicates:
+            - Path=/api/v1/livestream/**
+          filters:
+            - TokenRelay
+            - RewritePath=/api/v1/livestream/(?<segment>.*), /api/v1/livestream/$\{segment}
+
+              # Livestream WebSocket endpoint
+        - id: service-livestream-websocket
+          uri: lb://SERVICE-LIVESTREAM
+          predicates:
+            - Path=/ws/livestream/**
+          filters:
+            - RewritePath=/ws/livestream/(?<segment>.*), /ws/$\{segment}
 
   main:
     web-application-type: reactive
@@ -77,7 +92,7 @@ keycloak:
   auth-server-url: http://localhost:9098
   realm: skill-sharing
   client-id: backend-service
-  client-secret: wqKaJixE2KzSlyB7wIBqnS4DI3wQJKrz
+  client-secret: ifUlRmmtEfu02d80iz06MroNHC5kVuKf
 
 server:
   port: 8822

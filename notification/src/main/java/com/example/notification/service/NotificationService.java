@@ -1,9 +1,12 @@
 package com.example.notification.service;
 
 import com.example.notification.entity.Notification;
+
 import com.example.notification.repository.NotificationRepository;
 import com.example.serviceexchange.dto.NotificationEvent;
+
 import com.example.serviceuser.client.UserServiceClient;
+
 import com.example.serviceuser.dto.UserResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,11 +60,14 @@ public class NotificationService {
             case "EXCHANGE_REJECTED":
                 sendNotification(receiver, event, String.format("Votre demande pour la compétence %s a été rejetée. Raison : %s", event.skillName(), event.reason() != null ? event.reason() : "Non spécifiée"), "Notification de Partage de Compétence");
                 break;
+            case "REMINDER":
+                sendNotification(producer, event, event.reason(), "Rappel de Session");
+                sendNotification(receiver, event, event.reason(), "Rappel de Session");
+                break;
             default:
                 log.warn("Type de notification inconnu: {}", event.type());
         }
     }
-
     private UserResponse fetchUser(Long userId) {
         try {
             String token = keycloakTokenService.getAccessToken();

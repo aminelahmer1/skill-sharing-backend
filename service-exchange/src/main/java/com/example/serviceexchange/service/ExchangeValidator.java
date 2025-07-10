@@ -4,10 +4,9 @@ import com.example.serviceexchange.dto.ExchangeRequest;
 import com.example.serviceexchange.dto.UserResponse;
 import com.example.serviceexchange.entity.Exchange;
 import com.example.serviceexchange.entity.ExchangeStatus;
-import com.example.serviceexchange.exception.*;
+import com.example.serviceexchange.exception.InvalidExchangeException;
+import com.example.serviceexchange.exception.InvalidStatusTransitionException;
 import com.example.serviceexchange.repository.ExchangeRepository;
-import com.sun.jdi.request.DuplicateRequestException;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -17,13 +16,11 @@ public class ExchangeValidator {
     public ExchangeValidator(ExchangeRepository exchangeRepository) {
         this.exchangeRepository = exchangeRepository;
     }
-
     public void validateExchangeCreation(ExchangeRequest request, UserResponse producer, UserResponse receiver) {
         if (request.producerId().equals(request.receiverId())) {
             throw new InvalidExchangeException("Producer and receiver cannot be the same user");
         }
 
-        // Vérifier si une demande existe déjà
         boolean exists = exchangeRepository.existsByProducerIdAndReceiverIdAndSkillId(
                 request.producerId(),
                 request.receiverId(),
@@ -31,33 +28,45 @@ public class ExchangeValidator {
         );
 
         if (exists) {
-            throw new DuplicateRequestException("You have already requested this skill");
+            throw new InvalidExchangeException("You have already requested this skill");
         }
     }
+    public void validateStatusTransition(Exchange exchange, String newStatus) {
+        // Valide que le nouveau statut est un ExchangeStatus valide
+        try {
+            ExchangeStatus.valueOf(newStatus);
+        } catch (IllegalArgumentException e) {
+            throw new InvalidStatusTransitionException("Invalid status: " + newStatus);
+        }
 
-    public void validateStatusTransition(Exchange exchange, String newStatus, String userId) {
-        boolean isProducer = userId.equals(exchange.getProducerId().toString());
-
+        // Valide les transitions d'état en fonction du statut actuel
         switch (exchange.getStatus()) {
-            case ExchangeStatus.PENDING:
-                if (!ExchangeStatus.ACCEPTED.equals(newStatus) &&
-                        !ExchangeStatus.REJECTED.equals(newStatus) &&
-                        !isProducer) {
-                    throw new AccessDeniedException("Only producer can accept/reject pending exchanges");
+            case "PENDING":
+                if (!"ACCEPTED".equals(newStatus) && !"REJECTED".equals(newStatus)) {
+                    throw new InvalidStatusTransitionException("PENDING exchange can only transition to ACCEPTED or REJECTED");
                 }
                 break;
-            case ExchangeStatus.ACCEPTED:
-                if (!ExchangeStatus.IN_PROGRESS.equals(newStatus) && !isProducer) {
-                    throw new AccessDeniedException("Only producer can start the session");
+            case "ACCEPTED":
+                if (!"SCHEDULED".equals(newStatus) && !"IN_PROGRESS".equals(newStatus)) {
+                    throw new InvalidStatusTransitionException("ACCEPTED exchange can only transition to SCHEDULED or IN_PROGRESS");
                 }
                 break;
-            case ExchangeStatus.IN_PROGRESS:
-                if (!ExchangeStatus.COMPLETED.equals(newStatus) && !isProducer) {
-                    throw new AccessDeniedException("Only producer can complete the session");
+            case "SCHEDULED":
+                if (!"IN_PROGRESS".equals(newStatus)) {
+                    throw new InvalidStatusTransitionException("SCHEDULED exchange can only transition to IN_PROGRESS");
                 }
                 break;
-            default:
+            case "IN_PROGRESS":
+                if (!"COMPLETED".equals(newStatus)) {
+                    throw new InvalidStatusTransitionException("IN_PROGRESS exchange can only transition to COMPLETED");
+                }
+                break;
+            case "REJECTED":
+            case "COMPLETED":
+            case "CANCELLED":
                 throw new InvalidStatusTransitionException("Cannot change status from " + exchange.getStatus());
+            default:
+                throw new InvalidStatusTransitionException("Invalid current status: " + exchange.getStatus());
         }
     }
 }

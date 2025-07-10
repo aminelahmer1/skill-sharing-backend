@@ -53,7 +53,7 @@ keycloak:
   auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:9098}
   realm: skill-sharing
   client-id: backend-service
-  client-secret: ${KEYCLOAK_CLIENT_SECRET:wqKaJixE2KzSlyB7wIBqnS4DI3wQJKrz}
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:ifUlRmmtEfu02d80iz06MroNHC5kVuKf}
   admin-client-id: admin-cli
   admin-username: ${KEYCLOAK_ADMIN_USERNAME:admin}
   admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}

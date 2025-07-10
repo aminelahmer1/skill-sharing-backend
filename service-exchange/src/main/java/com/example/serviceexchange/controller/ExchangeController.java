@@ -2,6 +2,8 @@ package com.example.serviceexchange.controller;
 
 import com.example.serviceexchange.dto.ExchangeRequest;
 import com.example.serviceexchange.dto.ExchangeResponse;
+import com.example.serviceexchange.dto.SkillResponse;
+import com.example.serviceexchange.dto.UserResponse;
 import com.example.serviceexchange.service.ExchangeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +20,17 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExchangeController {
     private final ExchangeService exchangeService;
-
+    @GetMapping("/skill/{skillId}/accepted-receivers")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<List<UserResponse>> getAcceptedReceiversForSkill(
+            @PathVariable Integer skillId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(exchangeService.getAcceptedReceiversForSkill(skillId, jwt));
+    }
+    @GetMapping("/accepted-skills")
+    public List<SkillResponse> getAcceptedSkillsForReceiver(@AuthenticationPrincipal Jwt jwt) {
+        return exchangeService.getAcceptedSkillsForReceiver(jwt);
+    }
     @PostMapping
     @PreAuthorize("hasRole('RECEIVER')")
     public ResponseEntity<ExchangeResponse> createExchange(
@@ -48,25 +60,25 @@ public class ExchangeController {
         return ResponseEntity.ok(exchangeService.rejectExchange(id, reason, jwt));
     }
     record RejectReasonRequest(String reason) {}
-    @PostMapping("/{skillId}/start")
-    @PreAuthorize("hasRole('PRODUCER')")
-    public ResponseEntity<Void> startSession(
-            @PathVariable Integer skillId,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
-        exchangeService.startSession(skillId, jwt);
-        return ResponseEntity.ok().build();
-    }
-
-    @PostMapping("/{skillId}/complete")
-    @PreAuthorize("hasRole('PRODUCER')")
-    public ResponseEntity<Void> completeSession(
-            @PathVariable Integer skillId,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
-        exchangeService.completeSession(skillId, jwt);
-        return ResponseEntity.ok().build();
-    }
+//    @PostMapping("/{skillId}/start")
+//    @PreAuthorize("hasRole('PRODUCER')")
+//    public ResponseEntity<Void> startSession(
+//            @PathVariable Integer skillId,
+//            @AuthenticationPrincipal Jwt jwt
+//    ) {
+//        exchangeService.startSession(skillId, jwt);
+//        return ResponseEntity.ok().build();
+//    }
+//
+//    @PostMapping("/{skillId}/complete")
+//    @PreAuthorize("hasRole('PRODUCER')")
+//    public ResponseEntity<Void> completeSession(
+//            @PathVariable Integer skillId,
+//            @AuthenticationPrincipal Jwt jwt
+//    ) {
+//        exchangeService.completeSession(skillId, jwt);
+//        return ResponseEntity.ok().build();
+//    }
 
     @GetMapping("/my-exchanges")
     public ResponseEntity<List<ExchangeResponse>> getUserExchanges(
@@ -90,5 +102,22 @@ public class ExchangeController {
             @AuthenticationPrincipal Jwt jwt
     ) {
         return ResponseEntity.ok(exchangeService.acceptAllPendingExchanges(skillId, jwt));
+    }
+    @PutMapping("/{id}/status")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<Void> updateExchangeStatus(
+            @PathVariable Integer id,
+            @RequestParam String status,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        exchangeService.updateStatus(id, status, jwt);
+        return ResponseEntity.ok().build();
+    }
+    @GetMapping("/skill/{skillId}")
+    @PreAuthorize("hasAnyRole('PRODUCER', 'RECEIVER')")
+    public ResponseEntity<List<ExchangeResponse>> getExchangesBySkillId(
+            @PathVariable Integer skillId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(exchangeService.getExchangesBySkillId(skillId, jwt));
     }
 }

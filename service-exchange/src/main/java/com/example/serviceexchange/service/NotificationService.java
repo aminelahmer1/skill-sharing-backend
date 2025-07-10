@@ -77,10 +77,30 @@ public class NotificationService {
         sendKafkaNotification(event);
     }
 
-    public void notifySessionStarted(UserResponse receiver, UserResponse producer, Integer skillId, Integer exchangeId) {
+    public void notifySessionScheduled(UserResponse receiver, UserResponse producer, SkillResponse skill, Integer exchangeId) {
         String message = String.format(
-                "La session pour la compétence #%d commence maintenant avec %s",
-                skillId, producer.username()
+                "La session pour la compétence '%s' avec %s est planifiée pour %s",
+                skill.name(), producer.username(), skill.streamingDate() + " à " + skill.streamingTime()
+        );
+
+        sendRealTimeNotifications(receiver.keycloakId(), receiver.email(), "Session Planifiée", message);
+
+        NotificationEvent event = new NotificationEvent(
+                "SESSION_SCHEDULED",
+                exchangeId,
+                producer.id(),
+                receiver.id(),
+                skill.name(),
+                null,
+                skill.streamingDate()
+        );
+        sendKafkaNotification(event);
+    }
+
+    public void notifySessionStarted(UserResponse receiver, UserResponse producer, SkillResponse skill, Integer exchangeId) {
+        String message = String.format(
+                "La session pour la compétence '%s' commence maintenant avec %s",
+                skill.name(), producer.username()
         );
 
         sendRealTimeNotifications(receiver.keycloakId(), receiver.email(), "Session Commencée", message);
@@ -90,17 +110,17 @@ public class NotificationService {
                 exchangeId,
                 producer.id(),
                 receiver.id(),
-                "Compétence #" + skillId,
+                skill.name(),
                 null,
                 null
         );
         sendKafkaNotification(event);
     }
 
-    public void notifySessionCompleted(UserResponse receiver, UserResponse producer, Integer skillId, Integer exchangeId) {
+    public void notifySessionCompleted(UserResponse receiver, UserResponse producer, SkillResponse skill, Integer exchangeId) {
         String message = String.format(
-                "La session pour la compétence #%d avec %s est terminée. Veuillez fournir votre avis.",
-                skillId, producer.username()
+                "La session pour la compétence '%s' avec %s est terminée. Veuillez fournir votre avis.",
+                skill.name(), producer.username()
         );
 
         sendRealTimeNotifications(receiver.keycloakId(), receiver.email(), "Session Terminée", message);
@@ -110,7 +130,7 @@ public class NotificationService {
                 exchangeId,
                 producer.id(),
                 receiver.id(),
-                "Compétence #" + skillId,
+                skill.name(),
                 null,
                 null
         );
