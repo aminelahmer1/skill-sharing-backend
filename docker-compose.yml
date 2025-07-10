@@ -3,50 +3,53 @@ services:
     image: livekit/livekit-server:v1.7.2
     container_name: livekit-server
     ports:
-      - "7880:7880"  # API/HTTP
-      - "7881:7881"  # UDP/TURN
-      - "7882:7882"  # TCP/TURN
-      - "50000-50100:50000-50100/udp"  # Ports RTC
+      - "7880:7880"
+      - "7881:7881/udp"
+      - "7882:7882"
+      - "50000-50100:50000-50100/udp"
+    command: [ "/livekit-server" ] # Supprimez --config
     environment:
-      LIVEKIT_KEYS: "APIkey123:secretkey456"
-      LIVEKIT_PORT: 7880
-      LIVEKIT_BIND_ADDRESS: "0.0.0.0"
-      LIVEKIT_REDIS_ADDR: "redis:6379"
-      LIVEKIT_RTC_UDP_PORT: 7881
-      LIVEKIT_RTC_TCP_PORT: 7882
-      LIVEKIT_RTC_PORT_RANGE_START: 50000
-      LIVEKIT_RTC_PORT_RANGE_END: 50100
-      LIVEKIT_EXTERNAL_IP: ""
-      LIVEKIT_LOG_LEVEL: "debug"
-      LIVEKIT_DEVELOPMENT: "true"
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:7880" ]
-      interval: 20s
-      timeout: 10s
-      retries: 5
-      start_period: 40s  # Délai initial important
+      - LIVEKIT_PORT=7880
+      - LIVEKIT_BIND_ADDRESSES=0.0.0.0
+      - LIVEKIT_RTC_TCP_PORT=7882
+      - LIVEKIT_RTC_UDP_PORT=7881
+      - LIVEKIT_RTC_PORT_RANGE=50000-50100
+      - LIVEKIT_REDIS_ADDRESS=redis:6379
+      - "LIVEKIT_KEYS=testkey: jD6pWx8LtP9rZ!e72sYq3mXfN#tA4kVu"
+      - LIVEKIT_LOG_LEVEL=debug
+      - LIVEKIT_DEVELOPMENT=true
+      - LIVEKIT_ROOM_AUTO_CREATE=true
+      - LIVEKIT_ROOM_MAX_PARTICIPANTS=100
     depends_on:
       redis:
         condition: service_healthy
+    restart: always
     networks:
       - skillsharing-net
-    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:7880" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   redis:
-      image: redis:7-alpine
-      container_name: livekit-redis
-      command: redis-server --save 60 1 --loglevel warning
-      healthcheck:
-        test: [ "CMD", "redis-cli", "ping" ]
-        interval: 5s
-        timeout: 2s
-        retries: 15
-        start_period: 10s
-      networks:
-        - skillsharing-net
-      volumes:
-        - redis_data:/data
-      restart: unless-stopped
+    image: redis:7-alpine
+    container_name: livekit-redis
+    command: redis-server --save 60 1 --loglevel warning --appendonly yes
+    ports:
+      - "6379:6379"
+    networks:
+      - skillsharing-net
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   postgresql:
     container_name: ms_pg_sql
