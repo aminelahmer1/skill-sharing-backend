@@ -16,6 +16,7 @@
     <properties>
         <java.version>17</java.version>
         <spring-cloud.version>2024.0.0</spring-cloud.version>
+
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -26,9 +27,21 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- Override Okio version -->
+            <dependency>
+                <groupId>com.squareup.okio</groupId>
+                <artifactId>okio</artifactId>
+                <version>${okio.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
     <dependencies>
+        <!-- Explicitly declare Okio to ensure the correct version -->
+        <dependency>
+            <groupId>com.squareup.okio</groupId>
+            <artifactId>okio</artifactId>
+            <version>3.5.0</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -89,14 +102,12 @@
             <version>9.4.0</version>
             <scope>compile</scope>
         </dependency>
-
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-admin-client</artifactId>
             <version>24.0.2</version>
             <scope>compile</scope>
         </dependency>
-
         <dependency>
             <groupId>javax.xml.bind</groupId>
             <artifactId>jaxb-api</artifactId>
@@ -130,15 +141,25 @@
             <version>0.0.1-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
-        <!-- Replace this dependency in your pom.xml -->
         <dependency>
             <groupId>io.livekit</groupId>
             <artifactId>livekit-server</artifactId>
-            <version>0.9.0</version>
+            <version>0.10.0</version>
         </dependency>
-
-
     </dependencies>
+    <repositories>
+        <repository>
+            <id>sonatype-snapshots</id>
+            <url>https://s01.oss.sonatype.org/content/repositories/snapshots/</url>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>maven-central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+    </repositories>
     <build>
         <plugins>
             <plugin>

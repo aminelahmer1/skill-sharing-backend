@@ -9,7 +9,7 @@ rtc:
 redis:
   address: redis:6379
 keys:
-  my_api_key: x7y9z2k4j6m8n0p3q5r7t9v1w3x5y7z9a1b3c5d7f9
+  testkey: akQ2cFd4OEx0UDlyWmU3MnNZcTNtWGZOdEE0a1Z1MTIzCg==
 logging:
   level: debug
 development: true

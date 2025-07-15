@@ -34,11 +34,11 @@ public class LivestreamController {
     public ResponseEntity<LivestreamSession> startSession(
             @PathVariable Integer skillId,
             @RequestParam(defaultValue = "true") boolean immediate,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
+            @AuthenticationPrincipal Jwt jwt) {
         LivestreamSession session = livestreamService.startSession(skillId, jwt, immediate);
         return ResponseEntity.ok(session);
     }
+
 
     @PostMapping("/end/{sessionId}")
     public ResponseEntity<Void> endSession(
@@ -61,8 +61,7 @@ public class LivestreamController {
     @GetMapping("/{sessionId}/join")
     public ResponseEntity<String> joinSession(
             @PathVariable Long sessionId,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
+            @AuthenticationPrincipal Jwt jwt) {
         String joinToken = livestreamService.getJoinToken(sessionId, jwt);
         return ResponseEntity.ok(joinToken);
     }
@@ -80,32 +79,22 @@ public class LivestreamController {
     @GetMapping("/recordings/{sessionId}")
     public ResponseEntity<Resource> getRecording(
             @PathVariable Long sessionId,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
+            @AuthenticationPrincipal Jwt jwt) {
         try {
             LivestreamSession session = livestreamService.getSession(sessionId, jwt);
-            String recordingPath = session.getRecordingPath();
-            if (recordingPath == null) {
-                log.warn("No recording path found for session ID: {}", sessionId);
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recording not found for session ID: " + sessionId);
-            }
+            File file = new File(session.getRecordingPath());
 
-            File file = new File(recordingPath);
-            if (!file.exists() || !file.isFile()) {
-                log.warn("Recording file does not exist or is not a valid file at path: {} for session ID: {}", recordingPath, sessionId);
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recording file not found for session ID: " + sessionId);
+            if (!file.exists()) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recording not found");
             }
 
             Resource resource = new FileSystemResource(file);
-            log.info("Serving recording for session ID: {} from path: {}", sessionId, recordingPath);
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType("video/mp4"))
                     .body(resource);
-        } catch (ResponseStatusException e) {
-            throw e;
         } catch (Exception e) {
-            log.error("Error retrieving recording for session ID: {}: {}", sessionId, e.getMessage(), e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to retrieve recording: " + e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to retrieve recording: " + e.getMessage(), e);
         }
     }
 
@@ -117,7 +106,6 @@ public class LivestreamController {
             LivestreamSession session = livestreamService.getSession(sessionId, jwt);
             return ResponseEntity.ok(session);
         } catch (Exception e) {
-            log.error("Error fetching session {}: {}", sessionId, e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of(
                             "error", "Session fetch failed",
@@ -135,7 +123,7 @@ public class LivestreamController {
 
         if (session == null) {
             log.info("Aucune session trouvée pour la compétence: {}", skillId);
-            return ResponseEntity.noContent().build(); // HTTP 204 - No Content
+            return ResponseEntity.noContent().build();
         }
 
         return ResponseEntity.ok(session);

@@ -8,8 +8,10 @@ import com.example.servicelivestream.feignclient.SkillServiceClient;
 import com.example.servicelivestream.feignclient.UserServiceClient;
 import com.example.servicelivestream.repository.LivestreamSessionRepository;
 import com.example.servicelivestream.repository.RecordingRepository;
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -20,6 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -38,9 +41,15 @@ public class LivestreamService {
     private final KafkaTemplate<String, NotificationEvent> kafkaTemplate;
     private final LiveKitService liveKitService;
 
+    @Value("${application.livestream.allow-sessions-without-participants:true}")
+    private boolean allowSessionsWithoutParticipants;
+
     @Transactional(readOnly = true)
     public LivestreamSession getSessionBySkillId(Integer skillId, Jwt jwt) {
+        // 1. Récupérer l'utilisateur courant
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), "Bearer " + jwt.getTokenValue());
+
+        // 2. Trouver les sessions actives pour cette compétence
         List<LivestreamSession> sessions = sessionRepository.findBySkillIdAndStatusIn(
                 skillId, List.of("SCHEDULED", "LIVE"));
 
@@ -49,7 +58,10 @@ public class LivestreamService {
             return null;
         }
 
+        // Prendre la première session active (normalement il ne devrait y en avoir qu'une)
         LivestreamSession session = sessions.get(0);
+
+        // 3. Vérifier si l'utilisateur est autorisé
         if (!isAuthorizedForSession(session, user.id())) {
             throw new ResponseStatusException(FORBIDDEN, "Not authorized to access this session");
         }
@@ -57,22 +69,30 @@ public class LivestreamService {
         return session;
     }
 
+
     @Transactional
     public LivestreamSession startSession(Integer skillId, Jwt jwt, boolean immediate) {
         String token = "Bearer " + jwt.getTokenValue();
         log.info("Starting session for skillId: {}, immediate: {}", skillId, immediate);
 
+        // 1. Validation des paramètres
         validateSkillId(skillId);
-        checkExistingSessions(skillId);
+        checkExistingActiveSessions(skillId);
 
+        // 2. Récupération des données
         UserResponse producer = fetchUserByKeycloakId(jwt.getSubject(), token);
         SkillResponse skill = fetchSkill(skillId);
         validateProducerOwnsSkill(producer, skill);
 
+        // 3. Gestion des participants
         List<ExchangeResponse> acceptedExchanges = getAcceptedExchanges(skillId, token);
-        validateAcceptedExchangesExist(acceptedExchanges);
+        if (!allowSessionsWithoutParticipants && acceptedExchanges.isEmpty()) {
+            log.error("No accepted exchanges and configuration forbids empty sessions");
+            throw new ResponseStatusException(BAD_REQUEST, "No accepted exchanges for this skill");
+        }
 
-        String roomName = generateRoomName(skillId);
+        // 4. Création de la session
+        String roomName = "skill_" + skillId + "_" + System.currentTimeMillis();
         String producerToken = liveKitService.generateToken(
                 producer.id().toString(),
                 roomName,
@@ -85,7 +105,12 @@ public class LivestreamService {
                 roomName, immediate, startTime, producerToken
         );
 
-        updateExchangesAndNotify(acceptedExchanges, token, immediate, session, producer, skill);
+        // 5. Mise à jour et notifications
+        if (!acceptedExchanges.isEmpty()) {
+            updateExchangesAndNotify(acceptedExchanges, token, immediate, session, producer, skill);
+        } else {
+            log.warn("Starting session without participants for skill: {}", skillId);
+        }
 
         return session;
     }
@@ -97,7 +122,7 @@ public class LivestreamService {
         log.info("Checking for scheduled sessions to start at {}", now);
 
         sessionRepository.findByStatusAndStartTimeBefore("SCHEDULED", now)
-                .forEach(this::startScheduledSession);
+                .forEach(this::processScheduledSession);
     }
 
     @Transactional
@@ -135,10 +160,12 @@ public class LivestreamService {
         validateSessionIsLive(session);
 
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), "Bearer " + jwt.getTokenValue());
+
+        // Pour les receivers, autorisez la souscription même si canPublish est false
         return liveKitService.generateToken(
                 user.id().toString(),
                 session.getRoomName(),
-                user.id().equals(session.getProducerId()) // Only producer can publish
+                user.id().equals(session.getProducerId()) // isPublisher
         );
     }
 
@@ -152,7 +179,7 @@ public class LivestreamService {
     // Helper methods
     private boolean isAuthorizedForSession(LivestreamSession session, Long userId) {
         return session.getProducerId().equals(userId) ||
-                session.getReceiverIds().contains(userId);
+                (session.getReceiverIds() != null && session.getReceiverIds().contains(userId));
     }
 
     private void validateSkillId(Integer skillId) {
@@ -161,10 +188,17 @@ public class LivestreamService {
         }
     }
 
-    private void checkExistingSessions(Integer skillId) {
-        if (!sessionRepository.findBySkillIdAndStatusIn(
-                skillId, List.of("SCHEDULED", "LIVE", "COMPLETED")).isEmpty()) {
-            throw new ResponseStatusException(BAD_REQUEST, "Session already exists for this skill");
+    private void checkExistingActiveSessions(Integer skillId) {
+        List<LivestreamSession> activeSessions = sessionRepository.findBySkillIdAndStatusIn(
+                skillId, List.of("SCHEDULED", "LIVE"));
+
+        if (!activeSessions.isEmpty()) {
+            String sessionIds = activeSessions.stream()
+                    .map(s -> s.getId().toString())
+                    .collect(Collectors.joining(", "));
+
+            log.warn("Active session(s) already exist for skill {}: {}", skillId, sessionIds);
+            throw new ResponseStatusException(CONFLICT, "Active session already exists for this skill");
         }
     }
 
@@ -175,14 +209,16 @@ public class LivestreamService {
     }
 
     private List<ExchangeResponse> getAcceptedExchanges(Integer skillId, String token) {
-        return fetchExchangesBySkillId(skillId, token).stream()
-                .filter(e -> "ACCEPTED".equals(e.status()))
-                .collect(Collectors.toList());
-    }
-
-    private void validateAcceptedExchangesExist(List<ExchangeResponse> exchanges) {
-        if (exchanges.isEmpty()) {
-            throw new ResponseStatusException(BAD_REQUEST, "No accepted exchanges for this skill");
+        try {
+            return exchangeServiceClient.getExchangesBySkillId(skillId, token).stream()
+                    .filter(e -> "ACCEPTED".equals(e.status()))
+                    .collect(Collectors.toList());
+        } catch (FeignException e) {
+            log.error("Failed to fetch exchanges for skill {}: {}", skillId, e.contentUTF8());
+            return Collections.emptyList();
+        } catch (Exception e) {
+            log.error("Error fetching exchanges for skill {}: {}", skillId, e.getMessage());
+            return Collections.emptyList();
         }
     }
 
@@ -196,6 +232,8 @@ public class LivestreamService {
                     LocalDateTime.parse(skill.streamingDate() + "T" + skill.streamingTime());
         } catch (DateTimeParseException e) {
             throw new ResponseStatusException(BAD_REQUEST, "Invalid date/time format", e);
+        } catch (NullPointerException e) {
+            throw new ResponseStatusException(BAD_REQUEST, "Missing date/time information", e);
         }
     }
 
@@ -236,6 +274,7 @@ public class LivestreamService {
         });
     }
 
+
     private void notifyReceiver(LivestreamSession session, UserResponse producer,
                                 SkillResponse skill, Long receiverId, String token) {
         try {
@@ -254,49 +293,81 @@ public class LivestreamService {
         }
     }
 
-    private void startScheduledSession(LivestreamSession session) {
-        try {
-            session.setStatus("LIVE");
-            LivestreamSession savedSession = sessionRepository.save(session);
 
-            updateScheduledExchanges(savedSession);
-            notifyParticipants(savedSession);
+    private void processScheduledSession(LivestreamSession session) {
+        try {
+            log.info("Processing scheduled session: {}", session.getId());
+
+            session.setStatus("LIVE");
+
+            if (session.getProducerToken() == null || session.getProducerToken().isEmpty()) {
+                String producerToken = liveKitService.generateToken(
+                        session.getProducerId().toString(),
+                        session.getRoomName(),
+                        true
+                );
+                session.setProducerToken(producerToken);
+            }
+
+            LivestreamSession updatedSession = sessionRepository.save(session);
+
+            if (session.getReceiverIds() != null && !session.getReceiverIds().isEmpty()) {
+                updateScheduledExchanges(updatedSession);
+                notifyParticipants(updatedSession);
+            } else {
+                log.info("No participants for scheduled session {}", session.getId());
+            }
+
+            log.info("Successfully started scheduled session: {}", session.getId());
         } catch (Exception e) {
             log.error("Failed to start session {}: {}", session.getId(), e.getMessage(), e);
+            session.setStatus("ERROR");
+            sessionRepository.save(session);
         }
     }
 
     private void updateScheduledExchanges(LivestreamSession session) {
-        fetchExchangesBySkillId(session.getSkillId(), null).stream()
-                .filter(e -> "SCHEDULED".equals(e.status()))
-                .forEach(exchange -> {
-                    try {
-                        exchangeServiceClient.updateExchangeStatus(
-                                exchange.id(), "IN_PROGRESS", null);
-                    } catch (Exception e) {
-                        log.error("Failed to update exchange status", e);
-                    }
-                });
+        try {
+            List<ExchangeResponse> exchanges = fetchExchangesBySkillId(session.getSkillId(), null);
+            exchanges.stream()
+                    .filter(e -> "SCHEDULED".equals(e.status()))
+                    .forEach(exchange -> {
+                        try {
+                            exchangeServiceClient.updateExchangeStatus(
+                                    exchange.id(), "IN_PROGRESS", null);
+                        } catch (Exception e) {
+                            log.error("Failed to update exchange {}: {}", exchange.id(), e.getMessage());
+                        }
+                    });
+        } catch (Exception e) {
+            log.error("Failed to fetch exchanges for scheduled session {}: {}", session.getId(), e.getMessage());
+        }
     }
 
     private void notifyParticipants(LivestreamSession session) {
-        SkillResponse skill = fetchSkill(session.getSkillId());
-        fetchExchangesBySkillId(session.getSkillId(), null).forEach(exchange -> {
-            try {
-                UserResponse receiver = fetchUserById(exchange.receiverId(), null);
-                kafkaTemplate.send("notifications", new NotificationEvent(
-                        "LIVESTREAM_STARTED",
-                        session.getId().intValue(),
-                        session.getProducerId(),
-                        receiver.id(),
-                        skill.name(),
-                        null,
-                        session.getStartTime().toString()
-                ));
-            } catch (Exception e) {
-                log.error("Failed to notify participant", e);
-            }
-        });
+        try {
+            SkillResponse skill = fetchSkill(session.getSkillId());
+            List<ExchangeResponse> exchanges = fetchExchangesBySkillId(session.getSkillId(), null);
+
+            exchanges.forEach(exchange -> {
+                try {
+                    UserResponse receiver = fetchUserById(exchange.receiverId(), null);
+                    kafkaTemplate.send("notifications", new NotificationEvent(
+                            "LIVESTREAM_STARTED",
+                            session.getId().intValue(),
+                            session.getProducerId(),
+                            receiver.id(),
+                            skill.name(),
+                            null,
+                            session.getStartTime().toString()
+                    ));
+                } catch (Exception e) {
+                    log.error("Failed to notify participant for exchange {}: {}", exchange.id(), e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            log.error("Failed to notify participants for session {}: {}", session.getId(), e.getMessage());
+        }
     }
 
     private LivestreamSession getSessionById(Long sessionId) {
@@ -314,29 +385,38 @@ public class LivestreamService {
     }
 
     private void updateCompletedExchanges(LivestreamSession session, String token) {
-        fetchExchangesBySkillId(session.getSkillId(), token).stream()
-                .filter(e -> "IN_PROGRESS".equals(e.status()))
-                .forEach(exchange -> {
-                    try {
-                        exchangeServiceClient.updateExchangeStatus(
-                                exchange.id(), "COMPLETED", token);
-                    } catch (Exception e) {
-                        log.error("Failed to update exchange status", e);
-                    }
-                });
+        try {
+            List<ExchangeResponse> exchanges = fetchExchangesBySkillId(session.getSkillId(), token);
+            exchanges.stream()
+                    .filter(e -> "IN_PROGRESS".equals(e.status()))
+                    .forEach(exchange -> {
+                        try {
+                            exchangeServiceClient.updateExchangeStatus(
+                                    exchange.id(), "COMPLETED", token);
+                        } catch (Exception e) {
+                            log.error("Failed to update exchange {}: {}", exchange.id(), e.getMessage());
+                        }
+                    });
+        } catch (Exception e) {
+            log.error("Failed to update exchanges for completed session {}: {}", session.getId(), e.getMessage());
+        }
     }
 
     private void sendCompletionNotification(LivestreamSession session, UserResponse producer) {
-        SkillResponse skill = fetchSkill(session.getSkillId());
-        kafkaTemplate.send("notifications", new NotificationEvent(
-                "LIVESTREAM_ENDED",
-                null,
-                producer.id(),
-                null,
-                skill.name(),
-                null,
-                session.getEndTime().toString()
-        ));
+        try {
+            SkillResponse skill = fetchSkill(session.getSkillId());
+            kafkaTemplate.send("notifications", new NotificationEvent(
+                    "LIVESTREAM_ENDED",
+                    null,
+                    producer.id(),
+                    null,
+                    skill.name(),
+                    null,
+                    session.getEndTime().toString()
+            ));
+        } catch (Exception e) {
+            log.error("Failed to send completion notification for session {}: {}", session.getId(), e.getMessage());
+        }
     }
 
     private LivestreamSession getAuthorizedSession(Long sessionId, Jwt jwt) {
@@ -357,11 +437,15 @@ public class LivestreamService {
     }
 
     private void handleRecordingFinished(WebhookEvent event) {
-        LivestreamSession session = sessionRepository.findByRoomName(event.streamId());
-        if (session != null) {
-            saveRecording(session, event.recordingFilePath());
-        } else {
-            log.warn("No session found for room {}", event.streamId());
+        try {
+            LivestreamSession session = sessionRepository.findByRoomName(event.streamId());
+            if (session != null) {
+                saveRecording(session, event.recordingFilePath());
+            } else {
+                log.warn("No session found for room {}", event.streamId());
+            }
+        } catch (Exception e) {
+            log.error("Failed to handle recording event: {}", e.getMessage());
         }
     }
 
@@ -382,36 +466,48 @@ public class LivestreamService {
     private UserResponse fetchUserById(Long userId, String token) {
         try {
             return userServiceClient.getUserById(userId, token);
+        } catch (FeignException e) {
+            log.error("Feign error fetching user {}: {}", userId, e.contentUTF8());
+            throw new ResponseStatusException(valueOf(e.status()), "User service error");
         } catch (Exception e) {
-            log.error("Failed to fetch user with ID {}: {}", userId, e.getMessage(), e);
-            throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Failed to fetch user", e);
+            log.error("Failed to fetch user {}: {}", userId, e.getMessage());
+            throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Failed to fetch user");
         }
     }
 
     private UserResponse fetchUserByKeycloakId(String keycloakId, String token) {
         try {
             return userServiceClient.getUserByKeycloakId(keycloakId, token);
+        } catch (FeignException e) {
+            log.error("Feign error fetching user by Keycloak ID {}: {}", keycloakId, e.contentUTF8());
+            throw new ResponseStatusException(valueOf(e.status()), "User service error");
         } catch (Exception e) {
-            log.error("Failed to fetch user with keycloakId: {}", keycloakId, e);
-            throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Failed to fetch user", e);
+            log.error("Failed to fetch user by Keycloak ID {}: {}", keycloakId, e.getMessage());
+            throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Failed to fetch user");
         }
     }
 
     private SkillResponse fetchSkill(Integer skillId) {
         try {
             return skillServiceClient.getSkillById(skillId);
+        } catch (FeignException e) {
+            log.error("Feign error fetching skill {}: {}", skillId, e.contentUTF8());
+            throw new ResponseStatusException(valueOf(e.status()), "Skill service error");
         } catch (Exception e) {
-            log.error("Failed to fetch skill with ID: {}", skillId, e);
-            throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Failed to fetch skill", e);
+            log.error("Failed to fetch skill {}: {}", skillId, e.getMessage());
+            throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Failed to fetch skill");
         }
     }
 
     private List<ExchangeResponse> fetchExchangesBySkillId(Integer skillId, String token) {
         try {
             return exchangeServiceClient.getExchangesBySkillId(skillId, token);
+        } catch (FeignException e) {
+            log.error("Feign error fetching exchanges for skill {}: {}", skillId, e.contentUTF8());
+            throw new ResponseStatusException(valueOf(e.status()), "Exchange service error");
         } catch (Exception e) {
-            log.error("Failed to fetch exchanges for skillId: {}", skillId, e);
-            throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Failed to fetch exchanges", e);
+            log.error("Failed to fetch exchanges for skill {}: {}", skillId, e.getMessage());
+            throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Failed to fetch exchanges");
         }
     }
 }

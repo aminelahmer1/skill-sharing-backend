@@ -77,25 +77,36 @@ eureka:
     prefer-ip-address: true
     instance-id: ${spring.application.name}:${spring.application.instance_id:${random.value}}
 
-# Configuration LiveKit
+# Configuration LiveKit pour développement
 livekit:
-  url: ${LIVEKIT_URL:ws://localhost:7880}
-  api-key: ${LIVEKIT_API_KEY:APIhxK9mPqR2vF8sN3cL}
-  api-secret: ${LIVEKIT_API_SECRET:7nM9xP4qR8sW2vF6yH3kL5nC9pT1uE8mB4gD7jK0}
-  server-url: ${LIVEKIT_SERVER_URL:http://localhost:7880}
+  url: ws://localhost:7880
+  api-key: testkey
+  api-secret: akQ2cFd4OEx0UDlyWmU3MnNZcTNtWGZOdEE0a1Z1MTIzCg==
+  server-url: http://localhost:7880
+  cors:
+    allowed_origins:
+      - "http://localhost:4200"
+    allowed_headers:
+      - "*"
+    allowed_methods:
+      - "*"
+    rtc:
+      tcp_port: 7880
+      udp_port: 7880
+      port_range_start: 0
+      port_range_end: 0
   room:
-    max-participants: ${LIVEKIT_MAX_PARTICIPANTS:50}
-    empty-timeout: ${LIVEKIT_EMPTY_TIMEOUT:300}
-    max-duration: ${LIVEKIT_MAX_DURATION:3600}
+    max-participants: 50
+    empty-timeout: 300
+    max-duration: 3600
   token:
-    ttl: ${LIVEKIT_TOKEN_TTL:86400} # 24 heures en secondes
-    publisher-ttl: ${LIVEKIT_PUBLISHER_TTL:172800} # 48 heures pour les publishers
+    ttl: 86400 # 24 heures en secondes
+    publisher-ttl: 172800 # 48 heures pour les publishers
   recording:
-    enabled: ${LIVEKIT_RECORDING_ENABLED:true}
-    storage-path: ${LIVEKIT_RECORDING_PATH:./recordings}
-    max-size: ${LIVEKIT_RECORDING_MAX_SIZE:1GB}
-    format: ${LIVEKIT_RECORDING_FORMAT:mp4}
-
+    enabled: true
+    storage-path: ./recordings
+    max-size: 1GB
+    format: mp4
 # Configuration Firebase
 firebase:
   credentials:
@@ -113,6 +124,7 @@ keycloak:
   public-client: false
   verify-token-audience: true
 
+
 # Configuration de l'application
 application:
   config:
@@ -120,8 +132,10 @@ application:
     skill-url: ${SKILL_SERVICE_URL:http://localhost:8050/api/v1/skills}
     exchange-url: ${EXCHANGE_SERVICE_URL:http://localhost:8084/api/v1/exchanges}
     notification-url: ${NOTIFICATION_SERVICE_URL:http://localhost:8083/api/v1/notifications}
+  livestream:
+    allow-sessions-without-participants: true
 
-  # Configuration des streams
+
   streaming:
     max-concurrent-streams: ${MAX_CONCURRENT_STREAMS:100}
     stream-timeout: ${STREAM_TIMEOUT:7200} # 2 heures

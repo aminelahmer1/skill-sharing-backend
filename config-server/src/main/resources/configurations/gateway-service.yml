@@ -100,3 +100,33 @@ server:
 notification:
   websocket:
     endpoint: /ws
+
+livekit:
+  url: ws://localhost:7880
+  api-key: testkey
+  api-secret: akQ2cFd4OEx0UDlyWmU3MnNZcTNtWGZOdEE0a1Z1MTIzCg==
+  server-url: http://localhost:7880
+  cors:
+    allowed_origins:
+      - "http://localhost:4200"
+    allowed_headers:
+      - "*"
+    allowed_methods:
+      - "*"
+    rtc:
+      tcp_port: 7880
+      udp_port: 7880
+      port_range_start: 0
+      port_range_end: 0
+  room:
+    max-participants: 50
+    empty-timeout: 300
+    max-duration: 3600
+  token:
+    ttl: 86400 # 24 heures en secondes
+    publisher-ttl: 172800 # 48 heures pour les publishers
+  recording:
+    enabled: true
+    storage-path: ./recordings
+    max-size: 1GB
+    format: mp4

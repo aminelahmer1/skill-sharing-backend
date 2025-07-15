@@ -35,12 +35,15 @@ public class SecurityConfig {
             "/ws/notifications/info/**",
             "/ws/notifications/websocket",
             "api/v1/notifications/**",
-            "/ws/notifications/**"
+            "/ws/notifications/**",
+            "/ws/livestream/**"
 
     };
     private static final String[] PRODUCER_RECEIVER_ENDPOINTS = {
             "/api/v1/skills/**",
             "/api/v1/exchanges/**",
+            "/api/v1/livestream/**"
+
 
     };
 

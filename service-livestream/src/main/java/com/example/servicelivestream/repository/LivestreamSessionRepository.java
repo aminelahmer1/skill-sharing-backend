@@ -13,7 +13,7 @@ import java.util.List;
 public interface LivestreamSessionRepository extends JpaRepository<LivestreamSession, Long> {
     // Existing method
     LivestreamSession findByRoomName(String roomName);
-    @Query("SELECT s FROM LivestreamSession s WHERE s.status = :status AND s.startTime < :currentTime")
+    @Query("SELECT s FROM LivestreamSession s WHERE s.status = :status AND s.startTime <= :currentTime")
     List<LivestreamSession> findByStatusAndStartTimeBefore(
             @Param("status") String status,
             @Param("currentTime") LocalDateTime currentTime
