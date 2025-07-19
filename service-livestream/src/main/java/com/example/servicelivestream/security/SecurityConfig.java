@@ -25,6 +25,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/webhook").permitAll()
+                        .requestMatchers("/rtc/**").permitAll()
                         .requestMatchers("/api/v1/livestream/**").authenticated()
                         .anyRequest().authenticated()
                 )

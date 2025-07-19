@@ -55,7 +55,8 @@ public class SecurityConfig {
                 .authorizeExchange(exchange -> exchange
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers(PUBLIC_ENDPOINTS).permitAll()
-                        .pathMatchers("/ws/**").permitAll() //
+                        .pathMatchers("/ws/**").permitAll()
+                        .pathMatchers("/rtc/**").permitAll()
                         .pathMatchers(PRODUCER_RECEIVER_ENDPOINTS).hasAnyRole("PRODUCER", "RECEIVER")
                         .pathMatchers("/api/v1/users/**").authenticated()
 

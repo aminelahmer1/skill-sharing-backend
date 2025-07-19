@@ -160,12 +160,10 @@ public class LivestreamService {
         validateSessionIsLive(session);
 
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), "Bearer " + jwt.getTokenValue());
-
-        // Pour les receivers, autorisez la souscription même si canPublish est false
         return liveKitService.generateToken(
                 user.id().toString(),
                 session.getRoomName(),
-                user.id().equals(session.getProducerId()) // isPublisher
+                user.id().equals(session.getProducerId())
         );
     }
 
