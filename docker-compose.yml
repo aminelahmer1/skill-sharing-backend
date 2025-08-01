@@ -6,38 +6,33 @@ services:
       - "7880:7880"     # HTTP/WebSocket
       - "7881:7881/udp" # RTP/UDP
       - "7882:7882"     # RTP/TCP
-      - "7883:7883"     # RTMPS
-      - "50000-50100:50000-50100/udp" # Ports dynamiques
-      - "443:443"       # HTTPS (optionnel mais recommandé)
-
+      - "50000-50100:50000-50100/udp"
     environment:
       - LIVEKIT_PORT=7880
       - LIVEKIT_BIND_ADDRESSES=0.0.0.0
-      - LIVEKIT_RTC_TCP_PORT=7882
       - LIVEKIT_RTC_UDP_PORT=7881
       - LIVEKIT_RTC_PORT_RANGE_START=50000
       - LIVEKIT_RTC_PORT_RANGE_END=50100
-
-
       - LIVEKIT_REDIS_ADDRESS=redis:6379
       - "LIVEKIT_KEYS=testkey: akQ2cFd4OEx0UDlyWmU3MnNZcTNtWGZOdEE0a1Z1MTIzCg=="
-      - LIVEKIT_LOG_LEVEL=debug
       - LIVEKIT_DEVELOPMENT=true
-      - LIVEKIT_ROOM_AUTO_CREATE=true
-      - LIVEKIT_ROOM_MAX_PARTICIPANTS=100
-      - LIVEKIT_ALLOWED_ORIGINS=http://localhost:4200
+      - LIVEKIT_ANNOUNCE_IP=host.docker.internal
+      - LIVEKIT_ALLOWED_ORIGINS=http://localhost:4200,ws://localhost:4200
+      - LIVEKIT_TURN_ENABLED=true
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - skillsharing-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:7880/rtc/validate" ]  # Endpoint spécifique à LiveKit
+      test: [ "CMD", "curl", "-f", "http://localhost:7880/rtc/validate" ]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 90s  # Augmentez le délai initial
+      start_period: 90s
   redis:
     image: redis:7-alpine
     container_name: livekit-redis

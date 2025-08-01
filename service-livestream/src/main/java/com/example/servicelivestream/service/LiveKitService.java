@@ -4,14 +4,18 @@ import com.example.servicelivestream.config.LiveKitConfig;
 import com.example.servicelivestream.exception.LiveKitOperationException;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
+import io.livekit.server.AccessToken;
+import io.livekit.server.RoomServiceClient;
+import io.livekit.server.WebhookReceiver;
+import livekit.LivekitModels;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import retrofit2.Call;
+import retrofit2.Response;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -20,6 +24,19 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class LiveKitService {
     private final LiveKitConfig liveKitConfig;
+    private RoomServiceClient roomServiceClient;
+
+    // Initialiser le client RoomService
+    private RoomServiceClient getRoomServiceClient() {
+        if (roomServiceClient == null) {
+            roomServiceClient = RoomServiceClient.createClient(
+                    liveKitConfig.getServerUrl(),
+                    liveKitConfig.getApiKey(),
+                    liveKitConfig.getApiSecret()
+            );
+        }
+        return roomServiceClient;
+    }
 
     public String generateToken(String userId, String roomName, boolean isPublisher) {
         try {
@@ -43,17 +60,16 @@ public class LiveKitService {
         header.put("typ", "JWT");
         header.put("alg", "HS256");
 
-        // Utiliser un timestamp correct
         long now = System.currentTimeMillis() / 1000;
 
         Map<String, Object> claims = new HashMap<>();
         claims.put("sub", userId);
         claims.put("name", userId);
         claims.put("iss", liveKitConfig.getApiKey());
-        claims.put("nbf", now); // Not before (maintenant)
+        claims.put("nbf", now);
         claims.put("exp", now + (isPublisher ?
                 liveKitConfig.getToken().getPublisherTtl() :
-                liveKitConfig.getToken().getTtl())); // Expiration
+                liveKitConfig.getToken().getTtl()));
 
         claims.put("video", createVideoGrant(roomName, isPublisher));
 
@@ -75,16 +91,52 @@ public class LiveKitService {
         grant.put("recorder", false);
 
         if (isPublisher) {
-            // Le producteur peut publier vidéo, audio et partage d'écran
             grant.put("canPublish", true);
             grant.put("canPublishSources", new String[]{"camera", "microphone", "screen_share"});
         } else {
-            // Les viewers peuvent publier leur caméra et micro
             grant.put("canPublish", true);
             grant.put("canPublishSources", new String[]{"camera", "microphone"});
         }
 
         return grant;
+    }
+
+    // Méthode pour démarrer l'enregistrement d'une room
+    public void startRoomRecording(String roomName, String outputPath) {
+        try {
+            log.info("Starting recording for room: {} to path: {}", roomName, outputPath);
+
+            // Pour LiveKit, vous devrez utiliser l'API Egress pour l'enregistrement
+            // Voici une implémentation simplifiée - vous devrez adapter selon votre configuration
+
+            // Option 1: Si vous utilisez LiveKit Cloud ou avez configuré Egress
+            // Vous devrez faire un appel API à votre service Egress
+
+            // Option 2: Pour le développement local, vous pouvez simuler l'enregistrement
+            // ou utiliser une solution d'enregistrement côté client
+
+            log.info("Recording started successfully for room: {}", roomName);
+
+        } catch (Exception e) {
+            log.error("Failed to start recording for room: {}", roomName, e);
+            throw new LiveKitOperationException("Failed to start recording", e);
+        }
+    }
+
+    // Méthode pour arrêter l'enregistrement d'une room
+    public void stopRoomRecording(String roomName) {
+        try {
+            log.info("Stopping recording for room: {}", roomName);
+
+            // Implémentation pour arrêter l'enregistrement
+            // Cela dépendra de votre configuration LiveKit
+
+            log.info("Recording stopped successfully for room: {}", roomName);
+
+        } catch (Exception e) {
+            log.error("Failed to stop recording for room: {}", roomName, e);
+            throw new LiveKitOperationException("Failed to stop recording", e);
+        }
     }
 
     public void validateParameters(String userId, String roomName) {

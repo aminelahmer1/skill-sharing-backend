@@ -4,11 +4,17 @@ spring:
       globalcors:
         cors-configurations:
           '[/**]':
-            allowed-origins: "http://localhost:4200"
-            allowed-methods: "*"
-            allowed-headers: "*"
+            allowed-origins:
+              - "http://localhost:4200"
+              - "ws://localhost:4200"
+            allowed-methods:
+              - "*"
+            allowed-headers:
+              - "*"
             allow-credentials: true
-            exposed-headers: "Authorization"
+            exposed-headers:
+              - "Authorization"
+
       discovery:
         locator:
           enabled: true
@@ -68,15 +74,36 @@ spring:
             - Path=/api/v1/livestream/**
           filters:
             - TokenRelay
-            - RewritePath=/api/v1/livestream/(?<segment>.*), /api/v1/livestream/$\{segment}
 
-              # Livestream WebSocket endpoint
+        - id: livekit-http-api
+          uri: http://localhost:7880
+          predicates:
+            - Path=/livekit/**
+          filters:
+            - StripPrefix=1
+
+
+            # Route critique pour WebSocket LiveKit
+        - id: livekit-websocket-direct
+          uri: ws://localhost:7880
+          predicates:
+            - Path=/rtc,/rtc/**
+          filters:
+            - StripPrefix=1
+
+
         - id: service-livestream-websocket
           uri: lb://SERVICE-LIVESTREAM
           predicates:
-            - Path=/ws/livestream/**
+            - Path=/ws,/ws/websocket,/ws/info,/ws/info/**
           filters:
-            - RewritePath=/ws/livestream/(?<segment>.*), /ws/$\{segment}
+            - TokenRelay
+
+
+
+
+
+
 
   main:
     web-application-type: reactive
@@ -109,36 +136,37 @@ livekit:
   cors:
     allowed_origins:
       - "http://localhost:4200"
-    allowed_headers:
-      - "*"
-    allowed_methods:
-      - "*"
-    rtc:
-      tcp_port: 7882
-      udp_port: 7881
-      port_range_start: 0
-      port_range_end: 0
-    tls:
-      enabled: false
-      # ✅ Added proper TURN configuration
-    turn:
-        enabled: true
-        domain: localhost
-        tls-port: 443
-        udp-port: 3478
-        # Add STUN/TURN servers for better connectivity
-        servers:
-          - urls: "stun:stun.l.google.com:19302"
-          - urls: "stun:global.stun.twilio.com:3478?transport=udp"
+      - "ws://localhost:4200"
+
+  rtc:
+    udp_port: 7881
+    port_range:
+      start: 50000
+      end: 50100
+    ice_servers:
+      - urls: "stun:stun.l.google.com:19302"
+      - urls: "stun:stun1.l.google.com:19302"
+      - urls: "turn:openrelay.metered.ca:443?transport=tcp"
+        username: "openrelayproject"
+        credential: "openrelayproject"
+
+
+  turn:
+    enabled: true
+
+  tls:
+    enabled: false
+
   room:
-    max-participants: 50
-    empty-timeout: 300
-    max-duration: 3600
-    auto-create: true
+    max_participants: 50
+    empty_timeout: 300
+    max_duration: 7200
+    auto_create: true
 
   token:
-    ttl: 86400 # 24 heures en secondes
-    publisher-ttl: 172800 # 48 heures pour les publishers
+    ttl: 86400
+    publisher_ttl: 172800
+
   recording:
     enabled: true
     storage-path: ./recordings

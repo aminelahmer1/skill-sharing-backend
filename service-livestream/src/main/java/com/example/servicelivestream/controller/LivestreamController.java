@@ -1,15 +1,19 @@
 package com.example.servicelivestream.controller;
 
 import com.example.servicelivestream.dto.ChatMessage;
+import com.example.servicelivestream.dto.RecordingRequest;
+import com.example.servicelivestream.dto.RecordingResponse;
 import com.example.servicelivestream.entity.LivestreamSession;
 import com.example.servicelivestream.service.ChatService;
 import com.example.servicelivestream.service.LivestreamService;
+import com.example.servicelivestream.service.RecordingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -28,7 +32,7 @@ import static org.apache.kafka.common.requests.DeleteAclsResponse.log;
 public class LivestreamController {
     private final LivestreamService livestreamService;
     private final ChatService chatService;
-
+    private final RecordingService recordingService;
 
     @PostMapping("/start/{skillId}")
     public ResponseEntity<LivestreamSession> startSession(
@@ -58,14 +62,17 @@ public class LivestreamController {
         LivestreamSession session = livestreamService.getSession(sessionId, jwt);
         return ResponseEntity.ok(session);
     }
+    // Dans LivestreamController
     @GetMapping("/{sessionId}/join")
     public ResponseEntity<String> joinSession(
             @PathVariable Long sessionId,
+            @RequestParam(required = false, defaultValue = "false") boolean isProducer,
             @AuthenticationPrincipal Jwt jwt) {
-        String joinToken = livestreamService.getJoinToken(sessionId, jwt);
+
+        String joinToken = livestreamService.getJoinToken(sessionId, jwt, isProducer);
         return ResponseEntity.ok(joinToken);
     }
-
+    @PreAuthorize("hasRole('RECEIVER') or hasRole('PRODUCER')")
     @GetMapping("/{sessionId}/messages")
     public ResponseEntity<List<ChatMessage>> getSessionMessages(
             @PathVariable Long sessionId,
@@ -128,6 +135,32 @@ public class LivestreamController {
 
         return ResponseEntity.ok(session);
     }
+    @PostMapping("/{sessionId}/recording/start")
+    public ResponseEntity<RecordingResponse> startRecording(
+            @PathVariable Long sessionId,
+            @RequestBody RecordingRequest request,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        RecordingResponse response = recordingService.startRecording(sessionId, request, jwt);
+        return ResponseEntity.ok(response);
+    }
 
+    @PostMapping("/{sessionId}/recording/stop")
+    public ResponseEntity<Void> stopRecording(
+            @PathVariable Long sessionId,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        recordingService.stopRecording(sessionId, jwt);
+        return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/{sessionId}/recording/status")
+    public ResponseEntity<RecordingResponse> getRecordingStatus(
+            @PathVariable Long sessionId,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        RecordingResponse status = recordingService.getRecordingStatus(sessionId, jwt);
+        return ResponseEntity.ok(status);
+    }
 
 }

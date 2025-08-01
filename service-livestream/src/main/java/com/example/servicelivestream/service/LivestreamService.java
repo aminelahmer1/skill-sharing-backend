@@ -154,16 +154,22 @@ public class LivestreamService {
         return session;
     }
 
+    // Dans LivestreamService (service-livestream.service.ts)
     @Transactional(readOnly = true)
-    public String getJoinToken(Long sessionId, Jwt jwt) {
+    public String getJoinToken(Long sessionId, Jwt jwt, boolean isProducer) {
         LivestreamSession session = getAuthorizedSession(sessionId, jwt);
         validateSessionIsLive(session);
 
         UserResponse user = fetchUserByKeycloakId(jwt.getSubject(), "Bearer " + jwt.getTokenValue());
+
+        if (isProducer && !user.id().equals(session.getProducerId())) {
+            throw new ResponseStatusException(FORBIDDEN, "Only producer can get producer token");
+        }
+
         return liveKitService.generateToken(
                 user.id().toString(),
                 session.getRoomName(),
-                user.id().equals(session.getProducerId())
+                isProducer // true pour producteur, false pour receveur
         );
     }
 

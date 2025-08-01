@@ -15,16 +15,6 @@ spring:
       max-lifetime: 1200000
       leak-detection-threshold: 60000
 
-  cloud:
-    gateway:
-      globalcors:
-        cors-configurations:
-          '[/**]':
-            allowed-origins: "http://localhost:4200"
-            allowed-methods: "*"
-            allowed-headers: "*"
-            allow-credentials: true
-            exposed-headers: "Authorization"
 
   security:
     oauth2:
@@ -62,8 +52,6 @@ spring:
     template:
       default-topic: livestream-notifications
 
-  websocket:
-    allowed-origins: ${FRONTEND_URL:http://localhost:4200}
 
   firebase:
     credentials:
@@ -86,48 +74,36 @@ livekit:
   cors:
     allowed_origins:
       - "http://localhost:4200"
-    allowed_headers:
-      - "*"
-    allowed_methods:
-      - "*"
-    rtc:
-      tcp_port: 7882
-      udp_port: 7881
-      port_range_start: 0
-      port_range_end: 0
-    tls:
-      enabled: false # Désactiver TLS pour le développement
-      rtc:
-        tcp_port: 7882
-        udp_port: 7881
-        port_range_start: 0
-        port_range_end: 0
-      tls:
-        enabled: false
-        # ✅ Added proper TURN configuration
-      turn:
-        enabled: true
-        domain: localhost
-        tls-port: 443
-        udp-port: 3478
-        # Add STUN/TURN servers for better connectivity
-        servers:
-          - urls: "stun:stun.l.google.com:19302"
-          - urls: "stun:global.stun.twilio.com:3478?transport=udp"
-  room:
-    max-participants: 50
-    empty-timeout: 300
-    max-duration: 3600
-    auto-create: true
+      - "ws://localhost:4200"
+
+  rtc:
+    udp_port: 7881
+    port_range:
+      start: 50000
+      end: 50100
+    ice_servers:
+      - urls: "stun:stun.l.google.com:19302"
+      - urls: "stun:stun1.l.google.com:19302"
+      - urls: "turn:openrelay.metered.ca:443?transport=tcp"
+        username: "openrelayproject"
+        credential: "openrelayproject"
 
   turn:
     enabled: true
-    domain: localhost
-    tls-port: 443
-    udp-port: 3478
+
+  tls:
+    enabled: false
+
+  room:
+    max_participants: 50
+    empty_timeout: 300
+    max_duration: 7200
+    auto_create: true
+
   token:
-    ttl: 86400 # 24 heures en secondes
-    publisher-ttl: 172800 # 48 heures pour les publishers
+    ttl: 86400
+    publisher_ttl: 172800
+
   recording:
     enabled: true
     storage-path: ./recordings

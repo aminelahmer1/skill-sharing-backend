@@ -1,18 +1,43 @@
 port: 7880
-bind_addresses:
-  - "0.0.0.0"
+bind_addresses: ["0.0.0.0"]
 rtc:
-  tcp_port: 7882
+  tcp_port: 7880
   udp_port: 7881
-  port_range_start: 50000
-  port_range_end: 50100
+  # Configuration ICE améliorée
+  ice_servers:
+    - urls: ["stun:stun.l.google.com:19302"]
+    - urls: ["stun:stun1.l.google.com:19302"]
+    - urls: ["stun:global.stun.twilio.com:3478"]
+
+  # Paramètres de connectivité
+  ice_transport_policy: "all"
+  force_relay: false
+  ice_candidate_timeout: 15s
+  ice_disconnected_timeout: 25s
+  ice_failed_timeout: 25s
+  ice_keepalive_interval: 2s
+
 redis:
-  address: redis:6379
+  address: "redis:6379"
+
 keys:
-  testkey: akQ2cFd4OEx0UDlyWmU3MnNZcTNtWGZOdEE0a1Z1MTIzCg==
-logging:
-  level: debug
-development: true
+  testkey: "akQ2cFd4OEx0UDlyWmU3MnNZcTNtWGZOdEE0a1Z1MTIzCg=="
+
 room:
   auto_create: true
-  max_participants: 100
+  max_participants: 50
+  empty_timeout: 300s
+  departure_timeout: 30s
+  enable_remote_unmute: true
+
+# Configuration de développement
+development: true
+log_level: debug
+
+# Webhook désactivé pour le dev
+webhook:
+  urls: []
+
+# TURN désactivé en local
+turn:
+  enabled: false

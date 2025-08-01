@@ -28,43 +28,67 @@ public class SecurityConfig {
             "/actuator/**",
             "/api/v1/auth/**",
             "/api/v1/users/sync",
-            "/uploads/**",
-            "/skill-uploads/**",
-            "/api/v1/auth/**",
             "/api/v1/users/register",
-            "/ws/notifications/info/**",
-            "/ws/notifications/websocket",
-            "api/v1/notifications/**",
-            "/ws/notifications/**",
-            "/ws/livestream/**"
-
+            "/uploads/**",
+            "/skill-uploads/**"
     };
-    private static final String[] PRODUCER_RECEIVER_ENDPOINTS = {
+
+    private static final String[] WEBSOCKET_ENDPOINTS = {
+            "/ws",
+            "/ws/**",
+            "/ws/websocket",
+            "/ws/info",
+            "/ws/info/**",
+            "/ws/notifications",
+            "/ws/notifications/**"
+    };
+
+    private static final String[] LIVEKIT_ENDPOINTS = {
+            "/rtc",
+            "/rtc/**",
+            "/livekit",
+            "/livekit/**"
+    };
+
+    private static final String[] AUTHENTICATED_ENDPOINTS = {
             "/api/v1/skills/**",
             "/api/v1/exchanges/**",
-            "/api/v1/livestream/**"
-
-
+            "/api/v1/livestream/**",
+            "/api/v1/users/**",
+            "/api/v1/notifications/**"
     };
 
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
-        http
+        return http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeExchange(exchange -> exchange
+                        // ✅ Options requests toujours autorisées
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
+
+                        // ✅ Endpoints publics
                         .pathMatchers(PUBLIC_ENDPOINTS).permitAll()
-                        .pathMatchers("/ws/**").permitAll()
-                        .pathMatchers("/rtc/**").permitAll()
-                        .pathMatchers(PRODUCER_RECEIVER_ENDPOINTS).hasAnyRole("PRODUCER", "RECEIVER")
-                        .pathMatchers("/api/v1/users/**").authenticated()
 
+                        // ✅ WebSocket endpoints - PUBLICS pour l'établissement de connexion
+                        // L'authentification se fait dans l'interceptor WebSocket
+                        .pathMatchers(WEBSOCKET_ENDPOINTS).permitAll()
 
+                        // ✅ LiveKit endpoints publics
+                        .pathMatchers(LIVEKIT_ENDPOINTS).permitAll()
+
+                        // ✅ API endpoints nécessitent authentification
+                        .pathMatchers(AUTHENTICATED_ENDPOINTS).authenticated()
+
+                        // ✅ Tout le reste nécessite authentification
                         .anyExchange().authenticated()
                 )
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtReactiveAuthenticationConverter())));
-        return http.build();
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(jwt -> jwt
+                                .jwtAuthenticationConverter(jwtReactiveAuthenticationConverter())
+                        )
+                )
+                .build();
     }
 
     @Bean
@@ -89,5 +113,4 @@ public class SecurityConfig {
             return Mono.just(converter.convert(jwt));
         };
     }
-
 }
