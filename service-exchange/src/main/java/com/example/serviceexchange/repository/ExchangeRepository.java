@@ -28,7 +28,7 @@ public interface ExchangeRepository extends JpaRepository<Exchange, Integer> {
             @Param("skillId") Integer skillId);
 
     List<Exchange> findByProducerIdAndStatus(Long producerId, String status);
-
+    List<Exchange> findByReceiverIdAndStatusIn(Long receiverId, List<String> statuses);
     @Query("SELECT e FROM Exchange e WHERE e.status = :status AND e.streamingDate BETWEEN :start AND :end")
     List<Exchange> findByStatusAndStreamingDateBetween(
             @Param("status") String status,

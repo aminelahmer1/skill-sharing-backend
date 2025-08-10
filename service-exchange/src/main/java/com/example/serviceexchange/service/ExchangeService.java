@@ -112,23 +112,45 @@ public class ExchangeService {
     public List<SkillResponse> getAcceptedSkillsForReceiver(Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
         UserResponse receiver = getAuthenticatedUser(jwt);
-        log.info("Fetching accepted skills for receiver ID: {}", receiver.id());
+        log.info("Fetching skills for receiver ID: {} with statuses: ACCEPTED, PENDING, COMPLETED, IN_PROGRESS", receiver.id());
 
-        List<Exchange> acceptedExchanges = exchangeRepository.findByReceiverIdAndStatus(
-                receiver.id(), ExchangeStatus.ACCEPTED.toString()
+        // Define the statuses we want to include
+        List<String> targetStatuses = List.of(
+                ExchangeStatus.ACCEPTED.toString(),
+
+                ExchangeStatus.COMPLETED.toString(),
+                ExchangeStatus.IN_PROGRESS.toString()
         );
 
-        if (acceptedExchanges.isEmpty()) {
-            log.info("No accepted exchanges found for receiver ID: {}", receiver.id());
+        // Use optimized repository method for better performance
+        List<Exchange> exchanges = exchangeRepository.findByReceiverIdAndStatusIn(receiver.id(), targetStatuses);
+
+        if (exchanges.isEmpty()) {
+            log.info("No exchanges found for receiver ID: {} with target statuses", receiver.id());
             return List.of();
         }
 
-        return acceptedExchanges.stream()
-                .map(exchange -> fetchSkill(exchange.getSkillId()))
+        log.info("Found {} exchanges for receiver ID: {}", exchanges.size(), receiver.id());
+
+        return exchanges.stream()
+                .map(exchange -> {
+                    SkillResponse skill = fetchSkill(exchange.getSkillId());
+                    if (skill == null) {
+                        log.warn("Skill not found for exchange ID: {} with skill ID: {}", exchange.getId(), exchange.getSkillId());
+                    }
+                    return skill;
+                })
                 .filter(Objects::nonNull)
+                .distinct() // Remove duplicates if same skill appears in multiple exchanges
                 .collect(Collectors.toList());
     }
+    public boolean isSessionCompletedForSkill(Integer skillId) {
+        List<Exchange> exchanges = exchangeRepository.findBySkillId(skillId);
 
+        // Vérifier si au moins un échange est en statut COMPLETED
+        return exchanges.stream()
+                .anyMatch(exchange -> ExchangeStatus.COMPLETED.toString().equals(exchange.getStatus()));
+    }
     @Transactional
     public ExchangeResponse createExchange(ExchangeRequest request, Jwt jwt) {
         String receiverToken = "Bearer " + jwt.getTokenValue();
@@ -140,6 +162,9 @@ public class ExchangeService {
 
         if (skill.nbInscrits() >= skill.availableQuantity()) {
             throw new CapacityExceededException(NO_AVAILABLE_SLOTS);
+        }
+        if (isSessionCompletedForSkill(request.skillId())) {
+            throw new InvalidExchangeException("Une session a déjà été complétée pour cette compétence. Impossible de créer un nouvel échange.");
         }
 
         exchangeValidator.validateExchangeCreation(request, producer, receiver);

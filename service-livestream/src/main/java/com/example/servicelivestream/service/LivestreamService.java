@@ -74,7 +74,14 @@ public class LivestreamService {
     public LivestreamSession startSession(Integer skillId, Jwt jwt, boolean immediate) {
         String token = "Bearer " + jwt.getTokenValue();
         log.info("Starting session for skillId: {}, immediate: {}", skillId, immediate);
-
+        List<LivestreamSession> completedSessions = sessionRepository.findBySkillIdAndStatusIn(
+                skillId, List.of("COMPLETED")
+        );
+        if (!completedSessions.isEmpty()) {
+            log.error("Session already completed for skill: {}", skillId);
+            throw new ResponseStatusException(CONFLICT,
+                    "Une session a déjà été complétée pour cette compétence. Impossible d'en créer une nouvelle.");
+        }
         // 1. Validation des paramètres
         validateSkillId(skillId);
         checkExistingActiveSessions(skillId);
