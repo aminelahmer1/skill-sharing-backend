@@ -83,14 +83,19 @@ public class ExchangeService {
             throw new AccessDeniedException("Only the skill producer can view accepted receivers");
         }
 
-        // Récupérer les échanges ACCEPTED pour cette compétence
-        List<Exchange> acceptedExchanges = exchangeRepository.findBySkillIdAndStatus(
-                skillId,
-                ExchangeStatus.ACCEPTED.toString()
+        // CORRECTION: Récupérer TOUS les échanges (ACCEPTED, COMPLETED, IN_PROGRESS, SCHEDULED) pour cette compétence
+        List<String> validStatuses = List.of(
+                ExchangeStatus.ACCEPTED.toString(),
+                ExchangeStatus.COMPLETED.toString(),
+                ExchangeStatus.IN_PROGRESS.toString(),
+                ExchangeStatus.SCHEDULED.toString()
         );
 
-        // Collecter les IDs des receivers
-        Set<Long> receiverIds = acceptedExchanges.stream()
+        List<Exchange> exchanges = exchangeRepository.findBySkillIdAndStatusIn(skillId, validStatuses);
+        log.info("Found {} exchanges for skill {} with valid statuses", exchanges.size(), skillId);
+
+        // Collecter les IDs des receivers uniques
+        Set<Long> receiverIds = exchanges.stream()
                 .map(Exchange::getReceiverId)
                 .collect(Collectors.toSet());
 
@@ -105,9 +110,9 @@ public class ExchangeService {
             }
         }
 
+        log.info("Returning {} unique receivers for skill {}", receivers.size(), skillId);
         return receivers;
     }
-
     @Transactional(readOnly = true)
     public List<SkillResponse> getAcceptedSkillsForReceiver(Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
