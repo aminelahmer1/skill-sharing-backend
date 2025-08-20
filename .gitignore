@@ -35,9 +35,32 @@ mvnw.cmd
 /generated/
 /generated-sources/
 
-
-# Sensitive files
+### Sensitive files - Firebase credentials ###
+# Specific service account files
 service-exchange/src/main/resources/firebase-service-account.json
-skill-uploads/"service-livestream/src/main/resources/firebase-service-account.json" 
 service-livestream/src/main/resources/firebase-service-account.json
 service-messagerie/src/main/resources/firebase-service-account.json
+
+# General patterns for any Firebase service account files
+**/firebase-service-account.json
+**/*service-account*.json
+**/*firebase-adminsdk*.json
+
+### Other sensitive files ###
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+
+# Application properties with secrets
+**/application-prod.properties
+**/application-secrets.properties
+
+# SSL certificates and keys
+*.p12
+*.jks
+*.keystore
+*.pem
+*.key
+*.crt
