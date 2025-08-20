@@ -295,7 +295,7 @@ public class MessageService {
                 .collect(Collectors.toList());
     }
 
-    // ===== MÉTHODES PRIVÉES =====
+    
 
     private UserResponse fetchUserById(Long userId, String token) {
         try {
