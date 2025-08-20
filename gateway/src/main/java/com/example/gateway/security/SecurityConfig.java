@@ -23,26 +23,37 @@ import java.util.List;
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    // ✅ Endpoints publics
     private static final String[] PUBLIC_ENDPOINTS = {
             "/eureka/**",
             "/actuator/**",
             "/api/v1/auth/**",
             "/api/v1/users/sync",
-            "/api/v1/users/register",
-            "/uploads/**",
-            "/skill-uploads/**"
+            "/api/v1/users/register"
     };
 
+    // ✅ WebSocket endpoints - PUBLICS pour connexion initiale + SockJS
     private static final String[] WEBSOCKET_ENDPOINTS = {
             "/ws",
             "/ws/**",
             "/ws/websocket",
-            "/ws/info",
-            "/ws/info/**",
+            "/ws/info",          // ✅ CRITIQUE : Endpoint SockJS info
+            "/ws/info/**",       // ✅ CRITIQUE : Tous les endpoints SockJS info
             "/ws/notifications",
-            "/ws/notifications/**"
+            "/ws/notifications/**",
+            "/ws/messaging",     // ✅ Endpoint principal messagerie
+            "/ws/messaging/**",  // ✅ Tous les sous-endpoints messagerie (y compris /info)
+            "/ws/messages"
     };
 
+    // ✅ Uploads publics (auth déléguée aux services)
+    private static final String[] UPLOAD_ENDPOINTS = {
+            "/uploads/**",
+            "/skill-uploads/**",
+            "/message-uploads/**"
+    };
+
+    // ✅ LiveKit endpoints
     private static final String[] LIVEKIT_ENDPOINTS = {
             "/rtc",
             "/rtc/**",
@@ -50,39 +61,51 @@ public class SecurityConfig {
             "/livekit/**"
     };
 
+    // ✅ API endpoints authentifiés
     private static final String[] AUTHENTICATED_ENDPOINTS = {
             "/api/v1/skills/**",
             "/api/v1/exchanges/**",
             "/api/v1/livestream/**",
             "/api/v1/users/**",
-            "/api/v1/notifications/**"
+            "/api/v1/notifications/**",
+            "/api/v1/messages/**" // ✅ Messagerie API (pas WebSocket)
     };
 
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
         return http
+                // ✅ Désactiver CSRF pour les APIs
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
+
+                // ✅ Configuration CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
+                // ✅ Configuration des autorisations
                 .authorizeExchange(exchange -> exchange
-                        // ✅ Options requests toujours autorisées
+                        // ✅ OPTIONS toujours autorisées (CORS preflight)
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
 
                         // ✅ Endpoints publics
                         .pathMatchers(PUBLIC_ENDPOINTS).permitAll()
 
-                        // ✅ WebSocket endpoints - PUBLICS pour l'établissement de connexion
-                        // L'authentification se fait dans l'interceptor WebSocket
+                        // ✅ WebSocket endpoints - PUBLICS (CRUCIAL pour SockJS)
+                        // L'authentification se fait dans l'interceptor WebSocket du service
                         .pathMatchers(WEBSOCKET_ENDPOINTS).permitAll()
+
+                        // ✅ Uploads publics (auth déléguée aux services)
+                        .pathMatchers(UPLOAD_ENDPOINTS).permitAll()
 
                         // ✅ LiveKit endpoints publics
                         .pathMatchers(LIVEKIT_ENDPOINTS).permitAll()
 
-                        // ✅ API endpoints nécessitent authentification
+                        // ✅ API endpoints authentifiés
                         .pathMatchers(AUTHENTICATED_ENDPOINTS).authenticated()
 
-                        // ✅ Tout le reste nécessite authentification
+                        // ✅ Tout le reste authentifié
                         .anyExchange().authenticated()
                 )
+
+                // ✅ Configuration OAuth2 Resource Server
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt
                                 .jwtAuthenticationConverter(jwtReactiveAuthenticationConverter())
@@ -94,11 +117,23 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
+
+        // ✅ Credentials autorisés
         config.setAllowCredentials(true);
-        config.setAllowedOrigins(List.of("http://localhost:4200"));
+
+        // ✅ Origins autorisés (WebSocket + HTTP)
+        config.setAllowedOriginPatterns(List.of("http://localhost:4200", "ws://localhost:4200"));
+
+        // ✅ Méthodes autorisées
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
+
+        // ✅ Headers autorisés
         config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("Authorization", "Content-Type"));
+
+        // ✅ Headers exposés
+        config.setExposedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
+
+        // ✅ Cache CORS
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -106,10 +141,12 @@ public class SecurityConfig {
         return source;
     }
 
+    // ✅ Convertisseur JWT réactif
     private Converter<Jwt, Mono<AbstractAuthenticationToken>> jwtReactiveAuthenticationConverter() {
         return jwt -> {
             JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
             converter.setJwtGrantedAuthoritiesConverter(new KeycloakRealmRoleConverter());
+            converter.setPrincipalClaimName("sub"); // Support UUID et Long
             return Mono.just(converter.convert(jwt));
         };
     }

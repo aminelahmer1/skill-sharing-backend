@@ -101,6 +101,37 @@ spring:
 
 
 
+        - id: service-messagerie-http
+          uri: lb://SERVICE-MESSAGERIE
+          predicates:
+            - Path=/api/v1/messages/**
+          filters:
+            - TokenRelay
+
+        - id: service-messagerie-websocket
+          uri: lb:ws://SERVICE-MESSAGERIE
+          predicates:
+            - Path=/ws/messaging/**
+          filters:
+            - RewritePath=/ws/messaging/(?<segment>.*), /ws/${segment}
+
+        - id: service-messagerie-uploads
+          uri: lb://SERVICE-MESSAGERIE
+          predicates:
+            - Path=/message-uploads/**
+          filters:
+            - RewritePath=/message-uploads/(?<segment>.*), /message-uploads/${segment}
+
+        - id: service-messagerie-sockjs-info
+          uri: lb://SERVICE-MESSAGERIE
+          predicates:
+              - Path=/ws/messaging/info/**
+          filters:
+              - RewritePath=/ws/messaging/info(?<segment>.*), /ws/info${segment}
+
+
+
+
 
 
 

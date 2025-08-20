@@ -36,6 +36,31 @@ public class SkillService {
     private final UserServiceClient userServiceClient;
  private  final  FileStorageService fileStorageService;
 
+    public long countSkillsByProducerId(Long producerId, Jwt jwt) {
+        // 1. Récupérer l'utilisateur demandeur pour s'assurer qu'il est authentifié
+        UserResponse requestingUser = getAuthenticatedUser(jwt);
+
+        // 2. Récupérer les informations du producteur
+        UserResponse producer = userServiceClient.getUserById(
+                producerId,
+                "Bearer " + jwt.getTokenValue()
+        ).getBody();
+
+        if (producer == null) {
+            throw new UserNotFoundException("Producer not found with ID: " + producerId);
+        }
+
+        // 3. Vérifier que l'utilisateur est bien un PRODUCER
+        if (!producer.roles().contains("PRODUCER")) {
+            throw new AccessDeniedException("The requested user is not a PRODUCER");
+        }
+
+        // 4. Compter les compétences de ce producteur
+        long skillsCount = skillRepository.countByUserId(producerId);
+
+        log.info("Producer ID {} has {} total skills", producerId, skillsCount);
+        return skillsCount;
+    }
     private UserResponse getAuthenticatedUser(Jwt jwt) {
         String keycloakId = jwt.getSubject();
         UserResponse user = userServiceClient.getUserByKeycloakId(

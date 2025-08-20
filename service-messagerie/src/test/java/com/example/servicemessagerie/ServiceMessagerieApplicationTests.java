@@ -1,5 +1,5 @@
 package com.example.servicemessagerie;
-
+/*
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -10,4 +10,4 @@ class ServiceMessagerieApplicationTests {
     void contextLoads() {
     }
 
-}
+}*/

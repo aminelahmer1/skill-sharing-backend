@@ -27,5 +27,6 @@ public interface SkillRepository extends JpaRepository<Skill, Integer> {
     );
 
     List<Skill> findByUserId(Long userId);
-
+    @Query("SELECT COUNT(s) FROM Skill s WHERE s.userId = :userId")
+    long countByUserId(@Param("userId") Long userId);
 }

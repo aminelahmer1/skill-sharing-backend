@@ -24,6 +24,13 @@ public class SkillController {
 
     private final SkillService skillService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @GetMapping("/producer/{producerId}/count")
+    public ResponseEntity<Long> getSkillsCountByProducer(
+            @PathVariable Long producerId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(skillService.countSkillsByProducerId(producerId, jwt));
+    }
     @PostMapping
     @PreAuthorize("hasRole('PRODUCER')")
     public ResponseEntity<Integer> createSkill(
