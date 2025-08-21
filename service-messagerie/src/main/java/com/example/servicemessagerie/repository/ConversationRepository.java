@@ -15,25 +15,46 @@ import java.util.Optional;
 public interface ConversationRepository extends JpaRepository<Conversation, Long> {
 
     /**
+     * ✅ CORRIGÉ: Requête optimisée pour éviter le warning Hibernate
+     * Sépare la récupération des conversations et leurs participants
+     */
+    @Query("SELECT DISTINCT c FROM Conversation c " +
+            "WHERE c.id IN (" +
+            "    SELECT DISTINCT p.conversation.id FROM ConversationParticipant p " +
+            "    WHERE p.userId = :userId AND p.isActive = true" +
+            ") " +
+            "AND c.status = 'ACTIVE' " +
+            "ORDER BY c.lastMessageTime DESC NULLS LAST, c.createdAt DESC")
+    Page<Conversation> findByParticipantUserId(@Param("userId") Long userId, Pageable pageable);
+
+    /**
+     * ✅ NOUVEAU: Méthode pour récupérer les conversations avec participants
+     */
+    @Query("SELECT DISTINCT c FROM Conversation c " +
+            "LEFT JOIN FETCH c.participants p " +
+            "WHERE c.id IN :conversationIds")
+    List<Conversation> findConversationsWithParticipants(@Param("conversationIds") List<Long> conversationIds);
+
+    /**
+     * ✅ CORRIGÉ: Requête simple pour debug
+     */
+    @Query("SELECT c FROM Conversation c " +
+            "JOIN c.participants p " +
+            "WHERE p.userId = :userId AND p.isActive = true " +
+            "ORDER BY c.lastMessageTime DESC NULLS LAST")
+    List<Conversation> findByParticipantUserIdSimple(@Param("userId") Long userId);
+
+    /**
      * Trouve toutes les conversations d'un utilisateur avec un statut spécifique
      */
     @Query("SELECT DISTINCT c FROM Conversation c " +
             "JOIN c.participants p " +
-            "WHERE p.userId = :userId AND p.isActive = true " +
+            "WHERE p.userId = :userId " +
             "AND c.status = :status " +
-            "ORDER BY c.lastMessageTime DESC")
+            "ORDER BY c.lastMessageTime DESC NULLS LAST")
     Page<Conversation> findByParticipantUserIdAndStatus(@Param("userId") Long userId,
                                                         @Param("status") Conversation.ConversationStatus status,
                                                         Pageable pageable);
-
-    /**
-     * Trouve toutes les conversations d'un utilisateur (tous statuts)
-     */
-    @Query("SELECT DISTINCT c FROM Conversation c " +
-            "JOIN c.participants p " +
-            "WHERE p.userId = :userId AND p.isActive = true " +
-            "ORDER BY c.lastMessageTime DESC")
-    Page<Conversation> findByParticipantUserId(@Param("userId") Long userId, Pageable pageable);
 
     /**
      * Trouve une conversation directe entre deux utilisateurs
@@ -71,6 +92,20 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
             "ORDER BY c.lastMessageTime DESC")
     List<Conversation> searchByNameAndUserId(@Param("userId") Long userId,
                                              @Param("query") String query);
+
+    /**
+     * ✅ NOUVEAU: Méthode de debug pour vérifier les participants d'un utilisateur
+     */
+    @Query("SELECT p FROM ConversationParticipant p WHERE p.userId = :userId")
+    List<Object> findAllParticipantsByUserId(@Param("userId") Long userId);
+
+    /**
+     * ✅ NOUVEAU: Compter les conversations d'un utilisateur
+     */
+    @Query("SELECT COUNT(DISTINCT c) FROM Conversation c " +
+            "JOIN c.participants p " +
+            "WHERE p.userId = :userId AND p.isActive = true")
+    long countConversationsByUserId(@Param("userId") Long userId);
 
     /**
      * Trouve toutes les conversations d'un utilisateur par type
@@ -130,7 +165,4 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
             "AND p.isActive = true AND c.status = 'ACTIVE'")
     boolean canUserAccessConversation(@Param("conversationId") Long conversationId,
                                       @Param("userId") Long userId);
-
-
-
 }

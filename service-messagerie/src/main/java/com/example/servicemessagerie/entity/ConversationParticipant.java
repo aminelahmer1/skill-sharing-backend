@@ -5,7 +5,6 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
-
 @Entity
 @Table(name = "conversation_participants")
 @Data
@@ -40,7 +39,9 @@ public class ConversationParticipant {
     @Column(name = "notification_enabled")
     private boolean notificationEnabled = true;
 
+    // ✅ AJOUTER CE CHAMP
     @Column(name = "is_active")
+    @Builder.Default
     private boolean isActive = true;
 
     public enum ParticipantRole {

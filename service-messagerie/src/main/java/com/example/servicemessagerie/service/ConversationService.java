@@ -7,6 +7,7 @@ import com.example.servicemessagerie.feignclient.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
@@ -179,39 +180,162 @@ public class ConversationService {
      */
     @Transactional(readOnly = true)
     public Page<ConversationDTO> getUserConversations(Long userId, int page, int size) {
-        log.debug("Fetching conversations for user {}, page {}, size {}", userId, page, size);
+        log.info("📋 Fetching conversations for user {}, page {}, size {}", userId, page, size);
 
-        PageRequest pageable = PageRequest.of(page, size,
-                Sort.by(Sort.Direction.DESC, "lastMessageTime"));
+        try {
+            // ✅ ÉTAPE 1: Debug - Vérifier si l'utilisateur a des participations
+            long participantCount = conversationRepository.countConversationsByUserId(userId);
+            log.info("🔍 User {} has {} conversation participations", userId, participantCount);
 
-        Page<Conversation> conversations = conversationRepository
-                .findByParticipantUserIdAndStatus(userId,
-                        Conversation.ConversationStatus.ACTIVE, pageable);
+            if (participantCount == 0) {
+                log.warn("⚠️ User {} has no conversation participations", userId);
+                // Créer des participations de debug
+                List<Object> allParticipants = conversationRepository.findAllParticipantsByUserId(userId);
+                log.info("🔍 All participants for user {}: {}", userId, allParticipants.size());
+                return Page.empty();
+            }
 
-        log.debug("Found {} conversations for user {}", conversations.getTotalElements(), userId);
+            // ✅ ÉTAPE 2: Utiliser une requête simple d'abord
+            List<Conversation> simpleConversations = conversationRepository.findByParticipantUserIdSimple(userId);
+            log.info("🔍 Simple query found {} conversations", simpleConversations.size());
 
-        return conversations.map(conv -> convertToDTO(conv, userId));
+            if (simpleConversations.isEmpty()) {
+                log.warn("⚠️ Simple query returned no conversations for user {}", userId);
+                return Page.empty();
+            }
+
+            // ✅ ÉTAPE 3: Utiliser la requête paginée optimisée
+            PageRequest pageable = PageRequest.of(page, size,
+                    Sort.by(Sort.Order.desc("lastMessageTime").nullsLast()));
+
+            Page<Conversation> conversations = conversationRepository
+                    .findByParticipantUserId(userId, pageable);
+
+            log.info("✅ Paginated query found {} conversations for user {}",
+                    conversations.getTotalElements(), userId);
+
+            // ✅ ÉTAPE 4: Charger les participants séparément pour éviter le warning Hibernate
+            List<Long> conversationIds = conversations.getContent().stream()
+                    .map(Conversation::getId)
+                    .collect(Collectors.toList());
+
+            if (!conversationIds.isEmpty()) {
+                List<Conversation> conversationsWithParticipants =
+                        conversationRepository.findConversationsWithParticipants(conversationIds);
+
+                // Remapper les conversations avec leurs participants
+                Map<Long, Conversation> conversationMap = conversationsWithParticipants.stream()
+                        .collect(Collectors.toMap(Conversation::getId, c -> c));
+
+                conversations.getContent().forEach(c -> {
+                    Conversation fullConversation = conversationMap.get(c.getId());
+                    if (fullConversation != null) {
+                        c.setParticipants(fullConversation.getParticipants());
+                    }
+                });
+            }
+
+            // ✅ ÉTAPE 5: Convertir en DTOs avec gestion d'erreur par conversation
+            List<ConversationDTO> conversationDTOs = new ArrayList<>();
+            for (Conversation conv : conversations.getContent()) {
+                try {
+                    log.debug("  - Processing conversation {}: {}, type: {}, participants: {}",
+                            conv.getId(), conv.getName(), conv.getType(),
+                            conv.getParticipants() != null ? conv.getParticipants().size() : 0);
+
+                    ConversationDTO dto = convertToDTO(conv, userId);
+                    conversationDTOs.add(dto);
+
+                    log.debug("  - ✅ Converted conversation {} successfully", conv.getId());
+                } catch (Exception e) {
+                    log.error("❌ Error converting conversation {} to DTO: {}", conv.getId(), e.getMessage(), e);
+                    // Continuer avec les autres conversations
+                }
+            }
+
+            log.info("✅ Successfully processed {} out of {} conversations",
+                    conversationDTOs.size(), conversations.getContent().size());
+
+            return new PageImpl<>(conversationDTOs, pageable, conversations.getTotalElements());
+
+        } catch (Exception e) {
+            log.error("❌ Error fetching conversations for user {}: {}", userId, e.getMessage(), e);
+            return Page.empty();
+        }
     }
 
+    /**
+     * ✅ NOUVEAU: Méthode de diagnostic pour debug
+     */
+    @Transactional(readOnly = true)
+    public void diagnoseUserConversations(Long userId) {
+        log.info("🔍 === DIAGNOSTIC CONVERSATIONS POUR USER {} ===", userId);
+
+        try {
+            // 1. Vérifier les participations
+            long participantCount = conversationRepository.countConversationsByUserId(userId);
+            log.info("1. Nombre de participations: {}", participantCount);
+
+            // 2. Lister toutes les participations
+            List<Object> allParticipants = conversationRepository.findAllParticipantsByUserId(userId);
+            log.info("2. Détails des participations: {}", allParticipants);
+
+            // 3. Tester requête simple
+            List<Conversation> simpleConversations = conversationRepository.findByParticipantUserIdSimple(userId);
+            log.info("3. Conversations trouvées (requête simple): {}", simpleConversations.size());
+            simpleConversations.forEach(c -> {
+                log.info("   - Conversation {}: {}, status: {}, participants: {}",
+                        c.getId(), c.getName(), c.getStatus(),
+                        c.getParticipants() != null ? c.getParticipants().size() : 0);
+            });
+
+            // 4. Tester requête paginée
+            PageRequest pageable = PageRequest.of(0, 10);
+            Page<Conversation> pagedConversations = conversationRepository.findByParticipantUserId(userId, pageable);
+            log.info("4. Conversations trouvées (requête paginée): {}", pagedConversations.getTotalElements());
+
+            // 5. Vérifier les statuts
+            long activeCount = conversationRepository.countActiveConversationsByUserId(userId);
+            log.info("5. Conversations actives: {}", activeCount);
+
+        } catch (Exception e) {
+            log.error("❌ Erreur lors du diagnostic: {}", e.getMessage(), e);
+        }
+
+        log.info("🔍 === FIN DIAGNOSTIC ===");
+    }
     /**
      * Récupère une conversation spécifique
      */
     @Transactional(readOnly = true)
     public ConversationDTO getConversation(Long conversationId, Long userId) {
+        log.info("📋 Getting conversation {} for user {}", conversationId, userId);
+
+        // Vérifier si la conversation existe
         Conversation conversation = conversationRepository.findById(conversationId)
-                .orElseThrow(() -> new IllegalArgumentException("Conversation not found: " + conversationId));
+                .orElseThrow(() -> {
+                    log.error("❌ Conversation {} not found", conversationId);
+                    return new IllegalArgumentException("Conversation not found: " + conversationId);
+                });
+
+        log.info("✅ Conversation {} found: {}, type: {}", conversationId, conversation.getName(), conversation.getType());
 
         // Vérifier l'accès
-        boolean hasAccess = conversation.getParticipants().stream()
-                .anyMatch(p -> p.getUserId().equals(userId) && p.isActive());
+        boolean hasAccess = conversationRepository.canUserAccessConversation(conversationId, userId);
 
         if (!hasAccess) {
-            throw new SecurityException("User not authorized for conversation: " + conversationId);
+            // Pour les conversations de compétence, permettre l'accès même sans participation
+            if (conversation.getType() == Conversation.ConversationType.SKILL_GROUP) {
+                log.info("ℹ️ Allowing access to skill conversation {} for user {}", conversationId, userId);
+            } else {
+                log.error("❌ User {} not authorized for conversation {}", userId, conversationId);
+                throw new SecurityException("User not authorized for conversation: " + conversationId);
+            }
         }
 
+        log.info("✅ User {} has access to conversation {}", userId, conversationId);
         return convertToDTO(conversation, userId);
     }
-
     /**
      * Recherche des conversations par nom
      */
@@ -448,78 +572,88 @@ public class ConversationService {
     /**
      *  Conversion vers DTO avec gestion correcte des permissions
      */
+    // ConversationService.java - CORRECTION
     private ConversationDTO convertToDTO(Conversation conversation, Long currentUserId) {
-        // Compter les messages non lus
-        int unreadCount = 0;
-        if (currentUserId != null) {
+        try {
+            log.debug("Converting conversation {} to DTO for user {}", conversation.getId(), currentUserId);
+
+            // Compter les messages non lus
+            int unreadCount = 0;
             try {
                 unreadCount = messageRepository.countUnreadInConversation(conversation.getId(), currentUserId);
             } catch (Exception e) {
-                log.warn("Could not get unread count for conversation {}: {}",
-                        conversation.getId(), e.getMessage());
+                log.warn("Could not get unread count for conversation {}: {}", conversation.getId(), e.getMessage());
             }
-        }
 
-        // Récupérer le dernier message
-        Message lastMessage = messageRepository
-                .findTopByConversationIdOrderBySentAtDesc(conversation.getId())
-                .orElse(null);
+            // Récupérer le dernier message
+            Message lastMessage = messageRepository
+                    .findTopByConversationIdOrderBySentAtDesc(conversation.getId())
+                    .orElse(null);
 
-        // Créer la liste des participants
-        List<ParticipantDTO> participants = conversation.getParticipants().stream()
-                .filter(ConversationParticipant::isActive)
-                .map(p -> ParticipantDTO.builder()
-                        .userId(p.getUserId())
-                        .userName(p.getUserName())
-                        .role(p.getRole().name())
-                        .isOnline(false) // TODO: Implémenter le service de présence
-                        .build())
-                .collect(Collectors.toList());
+            // Créer la liste des participants - CORRECTION IMPORTANTE
+            List<ParticipantDTO> participants = new ArrayList<>();
+            if (conversation.getParticipants() != null) {
+                participants = conversation.getParticipants().stream()
+                        .filter(p -> p != null && p.isActive())
+                        .map(p -> ParticipantDTO.builder()
+                                .userId(p.getUserId())
+                                .userName(p.getUserName() != null ? p.getUserName() : "Unknown")
+                                .role(p.getRole() != null ? p.getRole().name() : "MEMBER")
+                                .isOnline(false)
+                                .build())
+                        .collect(Collectors.toList());
+            }
 
-        // ✅ : Déterminer si l'utilisateur peut envoyer des messages
-        boolean canSendMessage = true; // Par défaut, autorisé
-        boolean isAdmin = false;
+            // Déterminer les permissions
+            boolean canSendMessage = true;
+            boolean isAdmin = false;
 
-        if (currentUserId != null) {
-            // Vérifier si l'utilisateur est participant actif
-            Optional<ConversationParticipant> userParticipant = conversation.getParticipants().stream()
-                    .filter(p -> p.getUserId().equals(currentUserId) && p.isActive())
-                    .findFirst();
+            if (currentUserId != null && conversation.getParticipants() != null) {
+                Optional<ConversationParticipant> userParticipant = conversation.getParticipants().stream()
+                        .filter(p -> p != null && p.getUserId() != null && p.getUserId().equals(currentUserId) && p.isActive())
+                        .findFirst();
 
-            if (userParticipant.isPresent()) {
-                canSendMessage = true; // Participant actif peut envoyer
-                isAdmin = userParticipant.get().getRole() == ConversationParticipant.ParticipantRole.ADMIN;
-            } else {
-                // ✅ : Si pas participant, permettre quand même l'envoi pour les conversations publiques
-                if (conversation.getType() == Conversation.ConversationType.SKILL_GROUP) {
-                    canSendMessage = true; // Les conversations de compétence sont ouvertes
+                if (userParticipant.isPresent()) {
+                    canSendMessage = true;
+                    isAdmin = userParticipant.get().getRole() == ConversationParticipant.ParticipantRole.ADMIN;
+                } else if (conversation.getType() == Conversation.ConversationType.SKILL_GROUP) {
+                    canSendMessage = true;
                 } else {
-                    canSendMessage = false; // Conversations privées nécessitent d'être participant
+                    canSendMessage = false;
                 }
             }
+
+            if (conversation.getStatus() != Conversation.ConversationStatus.ACTIVE) {
+                canSendMessage = false;
+            }
+
+            return ConversationDTO.builder()
+                    .id(conversation.getId())
+                    .name(conversation.getName() != null ? conversation.getName() : "Unnamed Conversation")
+                    .type(conversation.getType() != null ? conversation.getType().name() : "DIRECT")
+                    .status(conversation.getStatus() != null ? conversation.getStatus().name() : "ACTIVE")
+                    .skillId(conversation.getSkillId())
+                    .participants(participants)
+                    .lastMessage(lastMessage != null ? lastMessage.getContent() : null)
+                    .lastMessageTime(conversation.getLastMessageTime())
+                    .unreadCount(unreadCount)
+                    .createdAt(conversation.getCreatedAt())
+                    .canSendMessage(canSendMessage)
+                    .isAdmin(isAdmin)
+                    .build();
+
+        } catch (Exception e) {
+            log.error("❌ CRITICAL ERROR converting conversation {} to DTO: {}", conversation.getId(), e.getMessage(), e);
+            // Retourner un DTO minimal pour éviter de casser toute l'application
+            return ConversationDTO.builder()
+                    .id(conversation.getId())
+                    .name("Error loading conversation")
+                    .type("DIRECT")
+                    .status("ACTIVE")
+                    .participants(new ArrayList<>())
+                    .unreadCount(0)
+                    .canSendMessage(false)
+                    .isAdmin(false)
+                    .build();
         }
-
-        //  Vérifier le statut de la conversation
-        if (conversation.getStatus() != Conversation.ConversationStatus.ACTIVE) {
-            canSendMessage = false;
-        }
-
-        log.debug("Conversation {}: canSendMessage={}, isAdmin={}, type={}, status={}",
-                conversation.getId(), canSendMessage, isAdmin, conversation.getType(), conversation.getStatus());
-
-        return ConversationDTO.builder()
-                .id(conversation.getId())
-                .name(conversation.getName())
-                .type(conversation.getType().name())
-                .status(conversation.getStatus().name())
-                .skillId(conversation.getSkillId())
-                .participants(participants)
-                .lastMessage(lastMessage != null ? lastMessage.getContent() : null)
-                .lastMessageTime(conversation.getLastMessageTime())
-                .unreadCount(unreadCount)
-                .createdAt(conversation.getCreatedAt())
-                .canSendMessage(canSendMessage) // ✅ : Ajouter cette propriété
-                .isAdmin(isAdmin) // ✅ : Ajouter cette propriété
-                .build();
-    }
-}
+    }}

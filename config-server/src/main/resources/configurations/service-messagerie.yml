@@ -62,6 +62,14 @@ logging:
     org.springframework.web.socket: DEBUG
     org.springframework.security: DEBUG
     org.springframework.web.cors: DEBUG  # Pour déboguer les CORS
+keycloak:
+  auth-server-url: http://localhost:9098
+  realm: skill-sharing
+  client-id: backend-service
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:ifUlRmmtEfu02d80iz06MroNHC5kVuKf}
+  ssl-required: none
+  public-client: false
+  verify-token-audience: true
 
 file:
   upload-dir: ./message-uploads

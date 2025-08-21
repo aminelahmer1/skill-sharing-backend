@@ -12,6 +12,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -35,20 +37,35 @@ public class ConversationController {
             @AuthenticationPrincipal Jwt jwt) {
 
         try {
+            // Utiliser le resolver pour obtenir le bon ID
             Long userId = userIdResolver.resolveUserId(jwt, token);
-            log.info("📋 Fetching conversations for user ID: {} (page: {}, size: {})", userId, page, size);
+
+            // Logger pour debug avec plus de détails
+            log.info("📋 Fetching conversations for resolved user ID: {}", userId);
+            log.debug("📋 JWT subject: {}, Resolved ID: {}, Page: {}, Size: {}",
+                    jwt.getSubject(), userId, page, size);
+
+            // ✅ AJOUT: Vérifier si c'est le premier appel et faire un diagnostic
+            if (page == 0) {
+                conversationService.diagnoseUserConversations(userId);
+            }
 
             Page<ConversationDTO> conversations = conversationService.getUserConversations(userId, page, size);
 
-            log.info("✅ Found {} conversations for user {} (total: {})",
-                    conversations.getNumberOfElements(), userId, conversations.getTotalElements());
+            log.info("✅ Found {} conversations for user {} (page {}/{})",
+                    conversations.getTotalElements(), userId, page, conversations.getTotalPages());
 
-            // ✅ : Log détaillé des conversations
-            conversations.getContent().forEach(conv -> {
-                log.debug("📋 Conversation {}: name='{}', type={}, participants={}, canSendMessage={}, status={}",
-                        conv.getId(), conv.getName(), conv.getType(),
-                        conv.getParticipants().size(), conv.isCanSendMessage(), conv.getStatus());
-            });
+            // ✅ AJOUT: Log détaillé des conversations trouvées
+            if (conversations.hasContent()) {
+                conversations.getContent().forEach(conv -> {
+                    log.debug("  📋 Conversation {}: {}, type: {}, participants: {}, unread: {}",
+                            conv.getId(), conv.getName(), conv.getType(),
+                            conv.getParticipants() != null ? conv.getParticipants().size() : 0,
+                            conv.getUnreadCount());
+                });
+            } else {
+                log.warn("⚠️ No conversations found for user {}", userId);
+            }
 
             return ResponseEntity.ok(conversations);
 
@@ -57,7 +74,32 @@ public class ConversationController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
+    @GetMapping("/debug/user-conversations")
+    public ResponseEntity<Map<String, Object>> debugUserConversations(
+            @RequestHeader("Authorization") String token,
+            @AuthenticationPrincipal Jwt jwt) {
 
+        try {
+            Long userId = userIdResolver.resolveUserId(jwt, token);
+            log.info("🔍 DEBUG: Diagnosing conversations for user {}", userId);
+
+            // Appeler le diagnostic
+            conversationService.diagnoseUserConversations(userId);
+
+            // Retourner des informations de debug
+            Map<String, Object> debug = new HashMap<>();
+            debug.put("userId", userId);
+            debug.put("keycloakId", jwt.getSubject());
+            debug.put("timestamp", LocalDateTime.now());
+            debug.put("message", "Diagnostic completed - check logs");
+
+            return ResponseEntity.ok(debug);
+
+        } catch (Exception e) {
+            log.error("❌ Error in debug endpoint: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
     /**
      * Récupère une conversation spécifique
      */

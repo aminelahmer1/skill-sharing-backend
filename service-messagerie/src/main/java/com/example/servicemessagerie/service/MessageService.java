@@ -295,7 +295,7 @@ public class MessageService {
                 .collect(Collectors.toList());
     }
 
-    
+
 
     private UserResponse fetchUserById(Long userId, String token) {
         try {
