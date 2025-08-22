@@ -93,4 +93,173 @@ public interface ExchangeRepository extends JpaRepository<Exchange, Integer> {
      */
     @Query("SELECT DISTINCT e FROM Exchange e WHERE e.skillId = :skillId AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')")
     List<Exchange> findAcceptedReceiversBySkillId(@Param("skillId") Integer skillId);
+
+    @Query("SELECT DISTINCT e FROM Exchange e WHERE e.producerId = :producerId AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')")
+    List<Exchange> findAllSubscribersExchangesByProducerId(@Param("producerId") Long producerId);
+    /**
+     * Récupère tous les skill IDs auxquels un receiver est inscrit avec des statuts valides
+     */
+    @Query("SELECT DISTINCT e.skillId FROM Exchange e WHERE e.receiverId = :receiverId AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')")
+    List<Integer> findSkillIdsByReceiverId(@Param("receiverId") Long receiverId);
+
+    /**
+     * Récupère tous les receivers (sauf le receiver courant) inscrits aux mêmes compétences
+     * avec des statuts valides
+     */
+    @Query("""
+    SELECT DISTINCT e FROM Exchange e 
+    WHERE e.skillId IN :skillIds 
+    AND e.receiverId != :currentReceiverId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    """)
+    List<Exchange> findPeerReceiversBySkillIds(@Param("skillIds") List<Integer> skillIds,
+                                               @Param("currentReceiverId") Long currentReceiverId);
+    /**
+     * Version optimisée : récupère directement les IDs des peer receivers
+     */
+    @Query("""
+    SELECT DISTINCT e.receiverId 
+    FROM Exchange e 
+    WHERE e.skillId IN :skillIds 
+    AND e.receiverId != :currentReceiverId 
+    AND e.status IN ('ACCEPTED', 'COMPLETED', 'IN_PROGRESS', 'SCHEDULED')
+    """)
+    List<Long> findPeerReceiverIdsBySkillIds(@Param("skillIds") List<Integer> skillIds,
+                                             @Param("currentReceiverId") Long currentReceiverId);
+    /**
+     * Récupère tous les autres receivers pour une compétence spécifique (excluant le receiver courant)
+     */
+    @Query("""
+    SELECT DISTINCT e FROM Exchange e 
+    WHERE e.skillId = :skillId 
+    AND e.receiverId != :currentReceiverId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    """)
+    List<Exchange> findOtherReceiversForSkill(@Param("skillId") Integer skillId,
+                                              @Param("currentReceiverId") Long currentReceiverId);
+
+    /**
+     * Récupère tous les membres (producers et receivers) pour les compétences d'un receiver
+     */
+    @Query("""
+    SELECT DISTINCT e FROM Exchange e 
+    WHERE e.skillId IN :skillIds 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    """)
+    List<Exchange> findAllMembersForSkills(@Param("skillIds") List<Integer> skillIds);
+    /**
+     * Récupère tous les échanges du receiver avec les détails nécessaires pour la communauté
+     */
+    @Query("""
+    SELECT e FROM Exchange e 
+    WHERE e.receiverId = :receiverId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.skillId, e.createdAt DESC
+    """)
+    List<Exchange> findReceiverExchangesForCommunity(@Param("receiverId") Long receiverId);
+
+    /**
+     * Récupère tous les échanges pour une compétence avec statuts valides
+     */
+    @Query("""
+    SELECT e FROM Exchange e 
+    WHERE e.skillId = :skillId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.createdAt DESC
+    """)
+    List<Exchange> findValidExchangesBySkillId(@Param("skillId") Integer skillId);
+
+    /**
+     * Récupère les échanges d'une compétence excluant un utilisateur spécifique
+     */
+    @Query("""
+    SELECT e FROM Exchange e 
+    WHERE e.skillId = :skillId 
+    AND e.receiverId != :excludeUserId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.createdAt DESC
+    """)
+    List<Exchange> findValidExchangesBySkillIdExcludingUser(@Param("skillId") Integer skillId,
+                                                            @Param("excludeUserId") Long excludeUserId);
+
+    /**
+     * Vérifie si un utilisateur est inscrit à une compétence
+     */
+    @Query("""
+    SELECT COUNT(e) > 0 FROM Exchange e 
+    WHERE e.skillId = :skillId 
+    AND e.receiverId = :userId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    """)
+    boolean isUserEnrolledInSkill(@Param("skillId") Integer skillId, @Param("userId") Long userId);
+
+    /**
+     * Récupère les statistiques de statuts pour une compétence
+     */
+    @Query("""
+    SELECT e.status, COUNT(e) 
+    FROM Exchange e 
+    WHERE e.skillId = :skillId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    GROUP BY e.status
+    """)
+    List<Object[]> getStatusStatsForSkill(@Param("skillId") Integer skillId);
+// Ajouter ces méthodes dans ExchangeRepository.java
+
+    /**
+     * Récupère tous les skill IDs d'un producteur avec leurs exchanges valides
+     */
+    @Query("""
+    SELECT DISTINCT e.skillId 
+    FROM Exchange e 
+    WHERE e.producerId = :producerId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    """)
+    List<Integer> findSkillIdsByProducerId(@Param("producerId") Long producerId);
+
+    /**
+     * Récupère tous les receivers pour un producteur (toutes ses compétences)
+     */
+    @Query("""
+    SELECT DISTINCT e FROM Exchange e 
+    WHERE e.producerId = :producerId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.skillId, e.createdAt DESC
+    """)
+    List<Exchange> findAllValidExchangesByProducerId(@Param("producerId") Long producerId);
+
+    /**
+     * Récupère tous les exchanges d'un receiver avec détails pour toutes ses compétences
+     */
+    @Query("""
+    SELECT e FROM Exchange e 
+    WHERE e.receiverId = :receiverId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.skillId, e.createdAt DESC
+    """)
+    List<Exchange> findAllValidExchangesByReceiverId(@Param("receiverId") Long receiverId);
+
+    /**
+     * Récupère tous les autres receivers pour une liste de compétences (excluant le receiver courant)
+     */
+    @Query("""
+    SELECT e FROM Exchange e 
+    WHERE e.skillId IN :skillIds 
+    AND e.receiverId != :excludeReceiverId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.skillId, e.createdAt DESC
+    """)
+    List<Exchange> findOtherReceiversForSkills(@Param("skillIds") List<Integer> skillIds,
+                                               @Param("excludeReceiverId") Long excludeReceiverId);
+
+    /**
+     * Récupère tous les exchanges pour une liste de compétences avec statuts valides
+     */
+    @Query("""
+    SELECT e FROM Exchange e 
+    WHERE e.skillId IN :skillIds 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.skillId, e.createdAt DESC
+    """)
+    List<Exchange> findValidExchangesBySkillIds(@Param("skillIds") List<Integer> skillIds);
 }

@@ -18,10 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -593,5 +590,997 @@ public class ExchangeService {
             log.error("Failed to obtain producer token for producer ID {}: {}", producerId, e.getMessage(), e);
             throw new RuntimeException("Unable to obtain producer token", e);
         }
+
+    }
+    @Transactional(readOnly = true)
+    public List<SubscriberDetailResponse> getDetailedSubscribersForProducer(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse producer = getAuthenticatedUser(jwt);
+
+        log.info("Fetching detailed subscribers for producer ID: {}", producer.id());
+
+        // Récupérer tous les échanges valides pour ce producteur
+        List<Exchange> exchanges = exchangeRepository.findAllSubscribersExchangesByProducerId(producer.id());
+
+        if (exchanges.isEmpty()) {
+            log.info("No subscribers found for producer ID: {}", producer.id());
+            return List.of();
+        }
+
+        // Grouper les échanges par receiver ID
+        Map<Long, List<Exchange>> exchangesByReceiver = exchanges.stream()
+                .collect(Collectors.groupingBy(Exchange::getReceiverId));
+
+        List<SubscriberDetailResponse> subscribers = new ArrayList<>();
+
+        for (Map.Entry<Long, List<Exchange>> entry : exchangesByReceiver.entrySet()) {
+            Long receiverId = entry.getKey();
+            List<Exchange> receiverExchanges = entry.getValue();
+
+            try {
+                UserResponse receiver = fetchUserById(receiverId, token);
+                if (receiver != null) {
+                    // Créer les informations de compétences pour ce receiver
+                    List<SkillSubscriptionInfo> skillsInfo = receiverExchanges.stream()
+                            .map(exchange -> {
+                                SkillResponse skill = fetchSkill(exchange.getSkillId());
+                                return new SkillSubscriptionInfo(
+                                        exchange.getSkillId(),
+                                        skill != null ? skill.name() : "Skill indisponible",
+                                        exchange.getStatus(),
+                                        exchange.getCreatedAt()
+                                );
+                            })
+                            .collect(Collectors.toList());
+
+                    SubscriberDetailResponse subscriberDetail = new SubscriberDetailResponse(
+                            receiver.id(),
+                            receiver.keycloakId(),
+                            receiver.username(),
+                            receiver.email(),
+                            receiver.firstName(),
+                            receiver.lastName(),
+                            receiver.pictureUrl(),
+                            receiver.roles(),
+                            skillsInfo
+                    );
+
+                    subscribers.add(subscriberDetail);
+                }
+            } catch (Exception e) {
+                log.error("Failed to fetch detailed info for subscriber with ID {}: {}", receiverId, e.getMessage());
+            }
+        }
+
+        log.info("Successfully retrieved {} unique detailed subscribers for producer ID: {}",
+                subscribers.size(), producer.id());
+
+        return subscribers;
+    }
+
+    // Version simplifiée pour juste la liste des utilisateurs uniques
+    @Transactional(readOnly = true)
+    public List<UserResponse> getAllSubscribersForProducer(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse producer = getAuthenticatedUser(jwt);
+
+        log.info("Fetching all unique subscribers for producer ID: {}", producer.id());
+
+        // Récupérer tous les échanges valides pour ce producteur
+        List<Exchange> exchanges = exchangeRepository.findAllSubscribersExchangesByProducerId(producer.id());
+
+        if (exchanges.isEmpty()) {
+            log.info("No subscribers found for producer ID: {}", producer.id());
+            return List.of();
+        }
+
+        log.info("Found {} exchanges for producer ID: {}", exchanges.size(), producer.id());
+
+        // Collecter les IDs des receivers uniques
+        Set<Long> uniqueReceiverIds = exchanges.stream()
+                .map(Exchange::getReceiverId)
+                .collect(Collectors.toSet());
+
+        log.info("Found {} unique receivers for producer ID: {}", uniqueReceiverIds.size(), producer.id());
+
+        // Récupérer les détails des receivers
+        List<UserResponse> subscribers = new ArrayList<>();
+        for (Long receiverId : uniqueReceiverIds) {
+            try {
+                UserResponse receiver = fetchUserById(receiverId, token);
+                if (receiver != null) {
+                    subscribers.add(receiver);
+                }
+            } catch (Exception e) {
+                log.error("Failed to fetch subscriber with ID {}: {}", receiverId, e.getMessage());
+            }
+        }
+
+        // Trier par nom pour une meilleure présentation
+        subscribers.sort((u1, u2) -> {
+            String name1 = (u1.firstName() != null ? u1.firstName() : "") + " " +
+                    (u1.lastName() != null ? u1.lastName() : "");
+            String name2 = (u2.firstName() != null ? u2.firstName() : "") + " " +
+                    (u2.lastName() != null ? u2.lastName() : "");
+            return name1.trim().compareToIgnoreCase(name2.trim());
+        });
+
+        log.info("Successfully retrieved {} unique subscribers for producer ID: {}",
+                subscribers.size(), producer.id());
+
+        return subscribers;
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserResponse> getPeerReceiversForReceiver(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse currentReceiver = getAuthenticatedUser(jwt);
+
+        log.info("Fetching peer receivers for receiver ID: {}", currentReceiver.id());
+
+        // ÉTAPE 1: Récupérer tous les skill IDs auxquels ce receiver est inscrit
+        List<Integer> skillIds = exchangeRepository.findSkillIdsByReceiverId(currentReceiver.id());
+
+        if (skillIds.isEmpty()) {
+            log.info("Receiver ID {} is not subscribed to any skills", currentReceiver.id());
+            return List.of();
+        }
+
+        log.info("Receiver ID {} is subscribed to {} skills: {}",
+                currentReceiver.id(), skillIds.size(), skillIds);
+
+        // ÉTAPE 2: Récupérer les IDs des autres receivers inscrits aux mêmes compétences
+        List<Long> peerReceiverIds = exchangeRepository.findPeerReceiverIdsBySkillIds(skillIds, currentReceiver.id());
+
+        if (peerReceiverIds.isEmpty()) {
+            log.info("No peer receivers found for receiver ID: {}", currentReceiver.id());
+            return List.of();
+        }
+
+        log.info("Found {} peer receivers for receiver ID: {}", peerReceiverIds.size(), currentReceiver.id());
+
+        // ÉTAPE 3: Récupérer les détails des peer receivers
+        List<UserResponse> peerReceivers = peerReceiverIds.stream()
+                .map(receiverId -> {
+                    try {
+                        UserResponse receiver = fetchUserById(receiverId, token);
+                        if (receiver != null && receiver.roles().contains("RECEIVER")) {
+                            return receiver;
+                        }
+                        return null;
+                    } catch (Exception e) {
+                        log.error("Failed to fetch peer receiver with ID {}: {}", receiverId, e.getMessage());
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .sorted((u1, u2) -> {
+                    String name1 = (u1.firstName() != null ? u1.firstName() : "") + " " +
+                            (u1.lastName() != null ? u1.lastName() : "");
+                    String name2 = (u2.firstName() != null ? u2.firstName() : "") + " " +
+                            (u2.lastName() != null ? u2.lastName() : "");
+                    return name1.trim().compareToIgnoreCase(name2.trim());
+                })
+                .collect(Collectors.toList());
+
+        log.info("Successfully retrieved {} peer receivers for receiver ID: {}",
+                peerReceivers.size(), currentReceiver.id());
+
+        return peerReceivers;
+    }
+
+    @Transactional(readOnly = true)
+    public List<PeerReceiverDetailResponse> getDetailedPeerReceiversForReceiver(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse currentReceiver = getAuthenticatedUser(jwt);
+
+        log.info("Fetching detailed peer receivers for receiver ID: {}", currentReceiver.id());
+
+        // ÉTAPE 1: Récupérer tous les skill IDs auxquels ce receiver est inscrit
+        List<Integer> skillIds = exchangeRepository.findSkillIdsByReceiverId(currentReceiver.id());
+
+        if (skillIds.isEmpty()) {
+            log.info("Receiver ID {} is not subscribed to any skills", currentReceiver.id());
+            return List.of();
+        }
+
+        // ÉTAPE 2: Récupérer tous les échanges des peer receivers pour ces compétences
+        List<Exchange> peerExchanges = exchangeRepository.findPeerReceiversBySkillIds(skillIds, currentReceiver.id());
+
+        if (peerExchanges.isEmpty()) {
+            log.info("No peer receivers found for receiver ID: {}", currentReceiver.id());
+            return List.of();
+        }
+
+        // ÉTAPE 3: Grouper les échanges par receiver ID
+        Map<Long, List<Exchange>> exchangesByReceiver = peerExchanges.stream()
+                .collect(Collectors.groupingBy(Exchange::getReceiverId));
+
+        List<PeerReceiverDetailResponse> detailedPeers = new ArrayList<>();
+
+        for (Map.Entry<Long, List<Exchange>> entry : exchangesByReceiver.entrySet()) {
+            Long receiverId = entry.getKey();
+            List<Exchange> receiverExchanges = entry.getValue();
+
+            try {
+                UserResponse peerReceiver = fetchUserById(receiverId, token);
+                if (peerReceiver != null && peerReceiver.roles().contains("RECEIVER")) {
+
+                    // Créer les informations des compétences communes
+                    List<CommonSkillInfo> commonSkills = receiverExchanges.stream()
+                            .map(exchange -> {
+                                SkillResponse skill = fetchSkill(exchange.getSkillId());
+                                UserResponse producer = fetchUserById(exchange.getProducerId(), token);
+
+                                return new CommonSkillInfo(
+                                        exchange.getSkillId(),
+                                        skill != null ? skill.name() : "Skill indisponible",
+                                        producer != null ? producer.firstName() + " " + producer.lastName() : "Producteur indisponible",
+                                        exchange.getStatus(),
+                                        exchange.getCreatedAt()
+                                );
+                            })
+                            .collect(Collectors.toList());
+
+                    PeerReceiverDetailResponse peerDetail = new PeerReceiverDetailResponse(
+                            peerReceiver.id(),
+                            peerReceiver.keycloakId(),
+                            peerReceiver.username(),
+                            peerReceiver.email(),
+                            peerReceiver.firstName(),
+                            peerReceiver.lastName(),
+                            peerReceiver.pictureUrl(),
+                            peerReceiver.roles(),
+                            commonSkills
+                    );
+
+                    detailedPeers.add(peerDetail);
+                }
+            } catch (Exception e) {
+                log.error("Failed to fetch detailed info for peer receiver with ID {}: {}", receiverId, e.getMessage());
+            }
+        }
+
+        // Trier par nombre de compétences communes (décroissant) puis par nom
+        detailedPeers.sort((p1, p2) -> {
+            int skillComparison = Integer.compare(p2.commonSkills().size(), p1.commonSkills().size());
+            if (skillComparison != 0) {
+                return skillComparison;
+            }
+
+            String name1 = (p1.firstName() != null ? p1.firstName() : "") + " " +
+                    (p1.lastName() != null ? p1.lastName() : "");
+            String name2 = (p2.firstName() != null ? p2.firstName() : "") + " " +
+                    (p2.lastName() != null ? p2.lastName() : "");
+            return name1.trim().compareToIgnoreCase(name2.trim());
+        });
+
+        log.info("Successfully retrieved {} detailed peer receivers for receiver ID: {}",
+                detailedPeers.size(), currentReceiver.id());
+
+        return detailedPeers;
+    }
+
+    // Méthode utilitaire pour obtenir un résumé des compétences communes
+    @Transactional(readOnly = true)
+    public Map<String, Object> getPeerReceiversSummary(Jwt jwt) {
+        UserResponse currentReceiver = getAuthenticatedUser(jwt);
+
+        List<Integer> skillIds = exchangeRepository.findSkillIdsByReceiverId(currentReceiver.id());
+        List<Long> peerReceiverIds = exchangeRepository.findPeerReceiverIdsBySkillIds(skillIds, currentReceiver.id());
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("subscribedSkillsCount", skillIds.size());
+        summary.put("peerReceiversCount", peerReceiverIds.size());
+        summary.put("subscribedSkillIds", skillIds);
+
+        return summary;
+    }
+
+    @Transactional(readOnly = true)
+    public List<SkillCommunityResponse> getSkillCommunitiesForReceiver(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse currentReceiver = getAuthenticatedUser(jwt);
+
+        log.info("Fetching skill communities for receiver ID: {}", currentReceiver.id());
+
+        // ÉTAPE 1: Récupérer tous les échanges du receiver
+        List<Exchange> myExchanges = exchangeRepository.findReceiverExchangesForCommunity(currentReceiver.id());
+
+        if (myExchanges.isEmpty()) {
+            log.info("Receiver ID {} has no valid exchanges", currentReceiver.id());
+            return List.of();
+        }
+
+        log.info("Found {} exchanges for receiver ID: {}", myExchanges.size(), currentReceiver.id());
+
+        List<SkillCommunityResponse> communities = new ArrayList<>();
+
+        // ÉTAPE 2: Pour chaque compétence, créer la communauté
+        for (Exchange myExchange : myExchanges) {
+            try {
+                // Récupérer les détails de la compétence
+                SkillResponse skill = fetchSkill(myExchange.getSkillId());
+                if (skill == null) {
+                    log.warn("Skill not found for ID: {}", myExchange.getSkillId());
+                    continue;
+                }
+
+                // Récupérer le producteur
+                UserResponse producer = fetchUserById(myExchange.getProducerId(), token);
+                if (producer == null) {
+                    log.warn("Producer not found for ID: {}", myExchange.getProducerId());
+                    continue;
+                }
+
+                // Récupérer les autres receivers pour cette compétence
+                List<Exchange> otherReceiverExchanges = exchangeRepository.findOtherReceiversForSkill(
+                        myExchange.getSkillId(), currentReceiver.id());
+
+                List<UserResponse> otherReceivers = otherReceiverExchanges.stream()
+                        .map(exchange -> {
+                            try {
+                                UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+                                return (receiver != null && receiver.roles().contains("RECEIVER")) ? receiver : null;
+                            } catch (Exception e) {
+                                log.error("Failed to fetch receiver ID {}: {}", exchange.getReceiverId(), e.getMessage());
+                                return null;
+                            }
+                        })
+                        .filter(Objects::nonNull)
+                        .distinct() // Éviter les doublons si un receiver a plusieurs échanges
+                        .sorted((u1, u2) -> {
+                            String name1 = (u1.firstName() != null ? u1.firstName() : "") + " " +
+                                    (u1.lastName() != null ? u1.lastName() : "");
+                            String name2 = (u2.firstName() != null ? u2.firstName() : "") + " " +
+                                    (u2.lastName() != null ? u2.lastName() : "");
+                            return name1.trim().compareToIgnoreCase(name2.trim());
+                        })
+                        .collect(Collectors.toList());
+
+                SkillCommunityResponse community = new SkillCommunityResponse(
+                        skill.id(),
+                        skill.name(),
+                        skill.description(),
+                        producer,
+                        otherReceivers,
+                        myExchange.getCreatedAt(),
+                        myExchange.getStatus()
+                );
+
+                communities.add(community);
+
+                log.info("Created community for skill '{}': 1 producer + {} other receivers",
+                        skill.name(), otherReceivers.size());
+
+            } catch (Exception e) {
+                log.error("Failed to create community for exchange ID {}: {}", myExchange.getId(), e.getMessage());
+            }
+        }
+
+        log.info("Successfully created {} skill communities for receiver ID: {}",
+                communities.size(), currentReceiver.id());
+
+        return communities;
+    }
+
+    @Transactional(readOnly = true)
+    public List<CommunityMemberResponse> getAllCommunityMembersForReceiver(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse currentReceiver = getAuthenticatedUser(jwt);
+
+        log.info("Fetching all community members for receiver ID: {}", currentReceiver.id());
+
+        // Récupérer les compétences du receiver
+        List<Integer> skillIds = exchangeRepository.findSkillIdsByReceiverId(currentReceiver.id());
+
+        if (skillIds.isEmpty()) {
+            return List.of();
+        }
+
+        // Récupérer tous les échanges pour ces compétences
+        List<Exchange> allExchanges = exchangeRepository.findAllMembersForSkills(skillIds);
+
+        // Grouper par userId (producer ou receiver)
+        Map<Long, List<Exchange>> exchangesByUser = new HashMap<>();
+
+        for (Exchange exchange : allExchanges) {
+            // Ajouter le producer
+            exchangesByUser.computeIfAbsent(exchange.getProducerId(), k -> new ArrayList<>()).add(exchange);
+
+            // Ajouter le receiver (sauf le receiver courant)
+            if (!exchange.getReceiverId().equals(currentReceiver.id())) {
+                exchangesByUser.computeIfAbsent(exchange.getReceiverId(), k -> new ArrayList<>()).add(exchange);
+            }
+        }
+
+        List<CommunityMemberResponse> members = new ArrayList<>();
+
+        for (Map.Entry<Long, List<Exchange>> entry : exchangesByUser.entrySet()) {
+            Long userId = entry.getKey();
+            List<Exchange> userExchanges = entry.getValue();
+
+            try {
+                UserResponse user = fetchUserById(userId, token);
+                if (user == null) continue;
+
+                // Déterminer le type de membre et les compétences communes
+                String memberType;
+                List<Integer> commonSkillIds = new ArrayList<>();
+
+                if (user.roles().contains("PRODUCER")) {
+                    memberType = "PRODUCER";
+                    // Pour un producer, récupérer les skills qu'il produit et auxquels le receiver est inscrit
+                    commonSkillIds = userExchanges.stream()
+                            .filter(e -> e.getProducerId().equals(userId))
+                            .map(Exchange::getSkillId)
+                            .distinct()
+                            .collect(Collectors.toList());
+                } else if (user.roles().contains("RECEIVER")) {
+                    memberType = "RECEIVER";
+                    // Pour un receiver, récupérer les skills en commun
+                    commonSkillIds = userExchanges.stream()
+                            .filter(e -> e.getReceiverId().equals(userId))
+                            .map(Exchange::getSkillId)
+                            .distinct()
+                            .collect(Collectors.toList());
+                } else {
+                    continue; // Ignorer les utilisateurs sans rôle approprié
+                }
+
+                CommunityMemberResponse member = new CommunityMemberResponse(
+                        user.id(),
+                        user.keycloakId(),
+                        user.username(),
+                        user.email(),
+                        user.firstName(),
+                        user.lastName(),
+                        user.pictureUrl(),
+                        user.roles(),
+                        memberType,
+                        commonSkillIds
+                );
+
+                members.add(member);
+
+            } catch (Exception e) {
+                log.error("Failed to fetch community member with ID {}: {}", userId, e.getMessage());
+            }
+        }
+
+        // Trier par type (PRODUCER d'abord) puis par nom
+        members.sort((m1, m2) -> {
+            int typeComparison = m1.memberType().compareTo(m2.memberType());
+            if (typeComparison != 0) {
+                return typeComparison;
+            }
+
+            String name1 = (m1.firstName() != null ? m1.firstName() : "") + " " +
+                    (m1.lastName() != null ? m1.lastName() : "");
+            String name2 = (m2.firstName() != null ? m2.firstName() : "") + " " +
+                    (m2.lastName() != null ? m2.lastName() : "");
+            return name1.trim().compareToIgnoreCase(name2.trim());
+        });
+
+        log.info("Successfully retrieved {} community members for receiver ID: {}",
+                members.size(), currentReceiver.id());
+
+        return members;
+    }
+
+    @Transactional(readOnly = true)
+    public FullCommunityResponse getFullCommunityForReceiver(Jwt jwt) {
+        // Récupérer les communautés par compétence
+        List<SkillCommunityResponse> skillCommunities = getSkillCommunitiesForReceiver(jwt);
+
+        // Récupérer tous les membres
+        List<CommunityMemberResponse> allMembers = getAllCommunityMembersForReceiver(jwt);
+
+        // Calculer les statistiques
+        int totalSkills = skillCommunities.size();
+        long totalProducers = allMembers.stream().filter(m -> "PRODUCER".equals(m.memberType())).count();
+        long totalOtherReceivers = allMembers.stream().filter(m -> "RECEIVER".equals(m.memberType())).count();
+        int totalMembers = allMembers.size();
+
+        CommunityStats stats = new CommunityStats(
+                totalSkills,
+                (int) totalProducers,
+                (int) totalOtherReceivers,
+                totalMembers
+        );
+
+        return new FullCommunityResponse(skillCommunities, allMembers, stats);
+    }
+
+    @Transactional(readOnly = true)
+    public SkillUsersResponse getSkillUsers(Integer skillId, Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse currentUser = getAuthenticatedUser(jwt);
+
+        log.info("Fetching users for skill ID: {} by user ID: {}", skillId, currentUser.id());
+
+        // Vérifier que la compétence existe
+        SkillResponse skill = fetchSkill(skillId);
+        if (skill == null) {
+            throw new SkillNotFoundException("Skill not found with ID: " + skillId);
+        }
+
+        // Récupérer le producteur de la compétence
+        UserResponse skillProducer = fetchUserById(skill.userId(), token);
+        if (skillProducer == null) {
+            throw new UserNotFoundException("Producer not found for skill ID: " + skillId);
+        }
+
+        String currentUserRole = determineUserRole(currentUser, skillProducer, skillId);
+        List<UserResponse> receivers = new ArrayList<>();
+
+        if ("PRODUCER".equals(currentUserRole)) {
+            // Si c'est le producteur, récupérer tous les receivers inscrits
+            receivers = getReceiversForProducer(skillId, token);
+            log.info("Producer view: found {} receivers for skill ID: {}", receivers.size(), skillId);
+
+        } else if ("RECEIVER".equals(currentUserRole)) {
+            // Si c'est un receiver, récupérer les autres receivers + vérifier qu'il est inscrit
+            if (!exchangeRepository.isUserEnrolledInSkill(skillId, currentUser.id())) {
+                throw new AccessDeniedException("You are not enrolled in this skill");
+            }
+            receivers = getOtherReceiversForReceiver(skillId, currentUser.id(), token);
+            log.info("Receiver view: found {} other receivers for skill ID: {}", receivers.size(), skillId);
+
+        } else {
+            throw new AccessDeniedException("You don't have access to this skill's users");
+        }
+
+        // Calculer les statistiques
+        SkillUsersStats stats = calculateSkillStats(skillId, receivers.size());
+
+        SkillUsersResponse response = new SkillUsersResponse(
+                skill.id(),
+                skill.name(),
+                skill.description(),
+                skillProducer,
+                receivers,
+                stats,
+                currentUserRole
+        );
+
+        log.info("Successfully retrieved {} users for skill '{}' (role: {})",
+                receivers.size() + 1, skill.name(), currentUserRole);
+
+        return response;
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserResponse> getSkillUsersSimple(Integer skillId, Jwt jwt) {
+        SkillUsersResponse fullResponse = getSkillUsers(skillId, jwt);
+
+        List<UserResponse> allUsers = new ArrayList<>();
+
+        // Ajouter le producteur seulement si l'utilisateur courant est un receiver
+        if ("RECEIVER".equals(fullResponse.currentUserRole())) {
+            allUsers.add(fullResponse.skillProducer());
+        }
+
+        // Ajouter tous les receivers
+        allUsers.addAll(fullResponse.receivers());
+
+        return allUsers;
+    }
+
+    private String determineUserRole(UserResponse currentUser, UserResponse skillProducer, Integer skillId) {
+        // Vérifier si c'est le producteur de cette compétence
+        if (currentUser.id().equals(skillProducer.id()) && currentUser.roles().contains("PRODUCER")) {
+            return "PRODUCER";
+        }
+
+        // Vérifier si c'est un receiver inscrit à cette compétence
+        if (currentUser.roles().contains("RECEIVER")) {
+            boolean isEnrolled = exchangeRepository.isUserEnrolledInSkill(skillId, currentUser.id());
+            if (isEnrolled) {
+                return "RECEIVER";
+            }
+        }
+
+        // Aucun accès valide
+        return "NONE";
+    }
+
+    private List<UserResponse> getReceiversForProducer(Integer skillId, String token) {
+        List<Exchange> exchanges = exchangeRepository.findValidExchangesBySkillId(skillId);
+
+        return exchanges.stream()
+                .map(Exchange::getReceiverId)
+                .distinct()
+                .map(receiverId -> {
+                    try {
+                        UserResponse receiver = fetchUserById(receiverId, token);
+                        return (receiver != null && receiver.roles().contains("RECEIVER")) ? receiver : null;
+                    } catch (Exception e) {
+                        log.error("Failed to fetch receiver ID {}: {}", receiverId, e.getMessage());
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .sorted((u1, u2) -> {
+                    String name1 = (u1.firstName() != null ? u1.firstName() : "") + " " +
+                            (u1.lastName() != null ? u1.lastName() : "");
+                    String name2 = (u2.firstName() != null ? u2.firstName() : "") + " " +
+                            (u2.lastName() != null ? u2.lastName() : "");
+                    return name1.trim().compareToIgnoreCase(name2.trim());
+                })
+                .collect(Collectors.toList());
+    }
+
+    private List<UserResponse> getOtherReceiversForReceiver(Integer skillId, Long currentUserId, String token) {
+        List<Exchange> exchanges = exchangeRepository.findValidExchangesBySkillIdExcludingUser(skillId, currentUserId);
+
+        return exchanges.stream()
+                .map(Exchange::getReceiverId)
+                .distinct()
+                .map(receiverId -> {
+                    try {
+                        UserResponse receiver = fetchUserById(receiverId, token);
+                        return (receiver != null && receiver.roles().contains("RECEIVER")) ? receiver : null;
+                    } catch (Exception e) {
+                        log.error("Failed to fetch receiver ID {}: {}", receiverId, e.getMessage());
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .sorted((u1, u2) -> {
+                    String name1 = (u1.firstName() != null ? u1.firstName() : "") + " " +
+                            (u1.lastName() != null ? u1.lastName() : "");
+                    String name2 = (u2.firstName() != null ? u2.firstName() : "") + " " +
+                            (u2.lastName() != null ? u2.lastName() : "");
+                    return name1.trim().compareToIgnoreCase(name2.trim());
+                })
+                .collect(Collectors.toList());
+    }
+
+    private SkillUsersStats calculateSkillStats(Integer skillId, int receiversCount) {
+        // Récupérer les statistiques de statuts
+        List<Object[]> statusStats = exchangeRepository.getStatusStatsForSkill(skillId);
+
+        Map<String, Integer> statusBreakdown = statusStats.stream()
+                .collect(Collectors.toMap(
+                        row -> (String) row[0],
+                        row -> ((Long) row[1]).intValue()
+                ));
+
+        int totalUsers = receiversCount + 1; // +1 pour le producteur
+
+        return new SkillUsersStats(receiversCount, totalUsers, statusBreakdown);
+    }
+
+    // Méthode utilitaire pour vérifier l'accès à une compétence
+    @Transactional(readOnly = true)
+    public boolean hasAccessToSkill(Integer skillId, Jwt jwt) {
+        try {
+            UserResponse currentUser = getAuthenticatedUser(jwt);
+            SkillResponse skill = fetchSkill(skillId);
+
+            if (skill == null) return false;
+
+            // Producteur de la compétence
+            if (currentUser.id().equals(skill.userId()) && currentUser.roles().contains("PRODUCER")) {
+                return true;
+            }
+
+            // Receiver inscrit à la compétence
+            if (currentUser.roles().contains("RECEIVER")) {
+                return exchangeRepository.isUserEnrolledInSkill(skillId, currentUser.id());
+            }
+
+            return false;
+        } catch (Exception e) {
+            log.error("Error checking access to skill {}: {}", skillId, e.getMessage());
+            return false;
+        }
+    }
+
+
+
+    // Ajouter ces méthodes dans ExchangeService.java
+
+    /**
+     * Récupère toutes les compétences de l'utilisateur connecté avec leurs utilisateurs
+     */
+    @Transactional(readOnly = true)
+    public UserSkillsWithUsersResponse getAllUserSkillsWithUsers(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse currentUser = getAuthenticatedUser(jwt);
+
+        log.info("Fetching all skills with users for user ID: {}", currentUser.id());
+
+        if (currentUser.roles().contains("PRODUCER")) {
+            return getProducerSkillsWithUsers(currentUser, token);
+        } else if (currentUser.roles().contains("RECEIVER")) {
+            return getReceiverSkillsWithUsers(currentUser, token);
+        } else {
+            throw new AccessDeniedException("User must have PRODUCER or RECEIVER role");
+        }
+    }
+
+    /**
+     * Logique pour un PRODUCER : récupère toutes ses compétences avec les receivers inscrits
+     */
+    private UserSkillsWithUsersResponse getProducerSkillsWithUsers(UserResponse producer, String token) {
+        log.info("Fetching producer skills for producer ID: {}", producer.id());
+
+        // Récupérer tous les skill IDs du producteur
+        List<Integer> skillIds = exchangeRepository.findSkillIdsByProducerId(producer.id());
+
+        if (skillIds.isEmpty()) {
+            log.info("No skills found for producer ID: {}", producer.id());
+            return new UserSkillsWithUsersResponse(producer, "PRODUCER", List.of(),
+                    new UserSkillsStats(0, 0, 0, 0, Map.of()));
+        }
+
+        log.info("Found {} skills for producer ID: {}", skillIds.size(), producer.id());
+
+        // Récupérer tous les exchanges pour ces compétences
+        List<Exchange> allExchanges = exchangeRepository.findAllValidExchangesByProducerId(producer.id());
+
+        // Grouper par skill ID
+        Map<Integer, List<Exchange>> exchangesBySkill = allExchanges.stream()
+                .collect(Collectors.groupingBy(Exchange::getSkillId));
+
+        List<SkillWithUsersResponse> skillsWithUsers = new ArrayList<>();
+        Set<Long> allUniqueReceivers = new HashSet<>();
+        Map<String, Integer> globalStatusBreakdown = new HashMap<>();
+
+        for (Integer skillId : skillIds) {
+            try {
+                SkillResponse skill = fetchSkill(skillId);
+                if (skill == null) {
+                    log.warn("Skill not found for ID: {}", skillId);
+                    continue;
+                }
+
+                List<Exchange> skillExchanges = exchangesBySkill.getOrDefault(skillId, List.of());
+
+                // Récupérer les receivers uniques pour cette compétence
+                Set<Long> receiverIds = skillExchanges.stream()
+                        .map(Exchange::getReceiverId)
+                        .collect(Collectors.toSet());
+
+                List<UserResponse> receivers = receiverIds.stream()
+                        .map(receiverId -> {
+                            try {
+                                UserResponse receiver = fetchUserById(receiverId, token);
+                                return (receiver != null && receiver.roles().contains("RECEIVER")) ? receiver : null;
+                            } catch (Exception e) {
+                                log.error("Failed to fetch receiver ID {}: {}", receiverId, e.getMessage());
+                                return null;
+                            }
+                        })
+                        .filter(Objects::nonNull)
+                        .sorted((u1, u2) -> {
+                            String name1 = (u1.firstName() != null ? u1.firstName() : "") + " " +
+                                    (u1.lastName() != null ? u1.lastName() : "");
+                            String name2 = (u2.firstName() != null ? u2.firstName() : "") + " " +
+                                    (u2.lastName() != null ? u2.lastName() : "");
+                            return name1.trim().compareToIgnoreCase(name2.trim());
+                        })
+                        .collect(Collectors.toList());
+
+                // Calculer les stats pour cette compétence
+                Map<String, Integer> skillStatusBreakdown = skillExchanges.stream()
+                        .collect(Collectors.groupingBy(
+                                Exchange::getStatus,
+                                Collectors.collectingAndThen(Collectors.counting(), Math::toIntExact)
+                        ));
+
+                SkillUsersStats skillStats = new SkillUsersStats(
+                        receivers.size(),
+                        receivers.size() + 1, // +1 pour le producteur
+                        skillStatusBreakdown
+                );
+
+                SkillWithUsersResponse skillWithUsers = new SkillWithUsersResponse(
+                        skill.id(),
+                        skill.name(),
+                        skill.description(),
+                        producer,
+                        receivers,
+                        skillStats,
+                        "PRODUCER"
+                );
+
+                skillsWithUsers.add(skillWithUsers);
+
+                // Ajouter aux statistiques globales
+                allUniqueReceivers.addAll(receiverIds);
+                skillStatusBreakdown.forEach((status, count) ->
+                        globalStatusBreakdown.merge(status, count, Integer::sum));
+
+                log.info("Processed skill '{}': {} receivers", skill.name(), receivers.size());
+
+            } catch (Exception e) {
+                log.error("Failed to process skill ID {}: {}", skillId, e.getMessage());
+            }
+        }
+
+        UserSkillsStats globalStats = new UserSkillsStats(
+                skillsWithUsers.size(),
+                allUniqueReceivers.size() + 1, // +1 pour le producteur
+                1, // le producteur lui-même
+                allUniqueReceivers.size(),
+                globalStatusBreakdown
+        );
+
+        log.info("Producer summary: {} skills, {} unique receivers",
+                skillsWithUsers.size(), allUniqueReceivers.size());
+
+        return new UserSkillsWithUsersResponse(producer, "PRODUCER", skillsWithUsers, globalStats);
+    }
+
+    /**
+     * Logique pour un RECEIVER : récupère toutes ses compétences avec producteurs et autres receivers
+     */
+    private UserSkillsWithUsersResponse getReceiverSkillsWithUsers(UserResponse receiver, String token) {
+        log.info("Fetching receiver skills for receiver ID: {}", receiver.id());
+
+        // Récupérer tous les skill IDs du receiver
+        List<Integer> skillIds = exchangeRepository.findSkillIdsByReceiverId(receiver.id());
+
+        if (skillIds.isEmpty()) {
+            log.info("No skills found for receiver ID: {}", receiver.id());
+            return new UserSkillsWithUsersResponse(receiver, "RECEIVER", List.of(),
+                    new UserSkillsStats(0, 0, 0, 0, Map.of()));
+        }
+
+        log.info("Found {} skills for receiver ID: {}", skillIds.size(), receiver.id());
+
+        // Récupérer tous les exchanges du receiver
+        List<Exchange> myExchanges = exchangeRepository.findAllValidExchangesByReceiverId(receiver.id());
+
+        // Récupérer tous les autres receivers pour ces compétences
+        List<Exchange> otherReceiversExchanges = exchangeRepository.findOtherReceiversForSkills(skillIds, receiver.id());
+
+        // Grouper par skill ID
+        Map<Integer, Exchange> myExchangesBySkill = myExchanges.stream()
+                .collect(Collectors.toMap(Exchange::getSkillId, e -> e, (e1, e2) -> e1));
+
+        Map<Integer, List<Exchange>> otherExchangesBySkill = otherReceiversExchanges.stream()
+                .collect(Collectors.groupingBy(Exchange::getSkillId));
+
+        List<SkillWithUsersResponse> skillsWithUsers = new ArrayList<>();
+        Set<Long> allUniqueProducers = new HashSet<>();
+        Set<Long> allUniqueOtherReceivers = new HashSet<>();
+        Map<String, Integer> globalStatusBreakdown = new HashMap<>();
+
+        for (Integer skillId : skillIds) {
+            try {
+                SkillResponse skill = fetchSkill(skillId);
+                if (skill == null) {
+                    log.warn("Skill not found for ID: {}", skillId);
+                    continue;
+                }
+
+                // Récupérer le producteur de cette compétence
+                UserResponse producer = fetchUserById(skill.userId(), token);
+                if (producer == null) {
+                    log.warn("Producer not found for skill ID: {}", skillId);
+                    continue;
+                }
+
+                // Récupérer les autres receivers pour cette compétence
+                List<Exchange> otherSkillExchanges = otherExchangesBySkill.getOrDefault(skillId, List.of());
+
+                Set<Long> otherReceiverIds = otherSkillExchanges.stream()
+                        .map(Exchange::getReceiverId)
+                        .collect(Collectors.toSet());
+
+                List<UserResponse> otherReceivers = otherReceiverIds.stream()
+                        .map(receiverId -> {
+                            try {
+                                UserResponse otherReceiver = fetchUserById(receiverId, token);
+                                return (otherReceiver != null && otherReceiver.roles().contains("RECEIVER")) ? otherReceiver : null;
+                            } catch (Exception e) {
+                                log.error("Failed to fetch receiver ID {}: {}", receiverId, e.getMessage());
+                                return null;
+                            }
+                        })
+                        .filter(Objects::nonNull)
+                        .sorted((u1, u2) -> {
+                            String name1 = (u1.firstName() != null ? u1.firstName() : "") + " " +
+                                    (u1.lastName() != null ? u1.lastName() : "");
+                            String name2 = (u2.firstName() != null ? u2.firstName() : "") + " " +
+                                    (u2.lastName() != null ? u2.lastName() : "");
+                            return name1.trim().compareToIgnoreCase(name2.trim());
+                        })
+                        .collect(Collectors.toList());
+
+                // Calculer les stats pour cette compétence
+                Exchange myExchange = myExchangesBySkill.get(skillId);
+                Map<String, Integer> skillStatusBreakdown = new HashMap<>();
+                if (myExchange != null) {
+                    skillStatusBreakdown.put(myExchange.getStatus(), 1);
+                }
+
+                // Ajouter les statuts des autres receivers
+                otherSkillExchanges.stream()
+                        .collect(Collectors.groupingBy(
+                                Exchange::getStatus,
+                                Collectors.collectingAndThen(Collectors.counting(), Math::toIntExact)
+                        ))
+                        .forEach((status, count) ->
+                                skillStatusBreakdown.merge(status, count, Integer::sum));
+
+                SkillUsersStats skillStats = new SkillUsersStats(
+                        otherReceivers.size() + 1, // +1 pour le receiver courant
+                        otherReceivers.size() + 2, // +1 receiver courant +1 producteur
+                        skillStatusBreakdown
+                );
+
+                SkillWithUsersResponse skillWithUsers = new SkillWithUsersResponse(
+                        skill.id(),
+                        skill.name(),
+                        skill.description(),
+                        producer,
+                        otherReceivers,
+                        skillStats,
+                        "RECEIVER"
+                );
+
+                skillsWithUsers.add(skillWithUsers);
+
+                // Ajouter aux statistiques globales
+                allUniqueProducers.add(producer.id());
+                allUniqueOtherReceivers.addAll(otherReceiverIds);
+                skillStatusBreakdown.forEach((status, count) ->
+                        globalStatusBreakdown.merge(status, count, Integer::sum));
+
+                log.info("Processed skill '{}': 1 producer, {} other receivers",
+                        skill.name(), otherReceivers.size());
+
+            } catch (Exception e) {
+                log.error("Failed to process skill ID {}: {}", skillId, e.getMessage());
+            }
+        }
+
+        UserSkillsStats globalStats = new UserSkillsStats(
+                skillsWithUsers.size(),
+                allUniqueProducers.size() + allUniqueOtherReceivers.size() + 1, // +1 pour le receiver courant
+                allUniqueProducers.size(),
+                allUniqueOtherReceivers.size() + 1, // +1 pour le receiver courant
+                globalStatusBreakdown
+        );
+
+        log.info("Receiver summary: {} skills, {} unique producers, {} other unique receivers",
+                skillsWithUsers.size(), allUniqueProducers.size(), allUniqueOtherReceivers.size());
+
+        return new UserSkillsWithUsersResponse(receiver, "RECEIVER", skillsWithUsers, globalStats);
+    }
+
+    /**
+     * Version simplifiée qui retourne juste les utilisateurs pour toutes les compétences
+     */
+    @Transactional(readOnly = true)
+    public List<UserResponse> getAllSkillUsersSimple(Jwt jwt) {
+        UserSkillsWithUsersResponse fullResponse = getAllUserSkillsWithUsers(jwt);
+
+        Set<UserResponse> allUniqueUsers = new HashSet<>();
+
+        for (SkillWithUsersResponse skill : fullResponse.skills()) {
+            // Ajouter le producteur si l'utilisateur courant est un receiver
+            if ("RECEIVER".equals(fullResponse.userPrimaryRole())) {
+                allUniqueUsers.add(skill.skillProducer());
+            }
+
+            // Ajouter tous les receivers
+            allUniqueUsers.addAll(skill.receivers());
+        }
+
+        return allUniqueUsers.stream()
+                .sorted((u1, u2) -> {
+                    String name1 = (u1.firstName() != null ? u1.firstName() : "") + " " +
+                            (u1.lastName() != null ? u1.lastName() : "");
+                    String name2 = (u2.firstName() != null ? u2.firstName() : "") + " " +
+                            (u2.lastName() != null ? u2.lastName() : "");
+                    return name1.trim().compareToIgnoreCase(name2.trim());
+                })
+                .collect(Collectors.toList());
     }
 }

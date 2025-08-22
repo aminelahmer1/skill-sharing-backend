@@ -1,8 +1,10 @@
+// Conversation.java - VERSION CORRIGÉE
 package com.example.servicemessagerie.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -44,8 +46,14 @@ public class Conversation {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
+    @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    @Version
+    @Column(name = "version")
+    @Builder.Default
+    private Long version = 0L;
 
     @OneToMany(mappedBy = "conversation", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
@@ -58,44 +66,94 @@ public class Conversation {
 
     // Enums
     public enum ConversationType {
-        DIRECT,      // Conversation directe entre 2 utilisateurs
-        GROUP,       // Groupe de discussion
-        SKILL_GROUP  // Groupe lié à une compétence
+        DIRECT,
+        GROUP,
+        SKILL_GROUP
     }
 
     public enum ConversationStatus {
-        ACTIVE,      // Conversation active
-        ARCHIVED,    // Conversation archivée
-        COMPLETED,   // Session de compétence terminée
-        CANCELLED    // Conversation annulée
+        ACTIVE,
+        ARCHIVED,
+        COMPLETED,
+        CANCELLED
     }
 
-    // Méthodes utilitaires
-    public void updateLastMessage(String content) {
+    // Méthodes utilitaires thread-safe
+    public synchronized void updateLastMessage(String content) {
         this.lastMessage = content;
         this.lastMessageTime = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
     }
 
-    public void addParticipant(ConversationParticipant participant) {
-        participants.add(participant);
-        participant.setConversation(this);
+    public synchronized void addParticipant(ConversationParticipant participant) {
+        if (participant != null) {
+            participants.add(participant);
+            participant.setConversation(this);
+        }
     }
 
-    public void removeParticipant(ConversationParticipant participant) {
-        participants.remove(participant);
-        participant.setConversation(null);
+    public synchronized void removeParticipant(ConversationParticipant participant) {
+        if (participant != null) {
+            participants.remove(participant);
+            participant.setConversation(null);
+        }
     }
 
+    /**
+     * ✅ CORRECTION: Méthode isParticipant corrigée pour éviter ConcurrentModificationException
+     * Utilise stream() directement sans créer de copie HashSet
+     */
     public boolean isParticipant(Long userId) {
-        return participants.stream()
-                .anyMatch(p -> p.getUserId().equals(userId) && p.isActive());
+        if (userId == null || participants == null) {
+            return false;
+        }
+
+        try {
+            // ✅ IMPORTANT: Ne pas créer de HashSet, utiliser stream directement
+            // Hibernate peut charger la collection pendant l'itération
+            return participants.stream()
+                    .anyMatch(p -> p != null &&
+                            p.getUserId() != null &&
+                            p.getUserId().equals(userId) &&
+                            p.isActive());
+        } catch (Exception e) {
+            // En cas d'erreur, log et retourner false
+            System.err.println("Error checking participant status: " + e.getMessage());
+            return false;
+        }
     }
 
-    public int getActiveParticipantCount() {
-        return (int) participants.stream()
-                .filter(ConversationParticipant::isActive)
-                .count();
+    /**
+     * ✅ CORRECTION: Méthode alternative qui force le chargement complet avant l'itération
+     */
+    public boolean isParticipantSafe(Long userId) {
+        if (userId == null || participants == null) {
+            return false;
+        }
+
+        // Forcer l'initialisation complète de la collection
+        int size = participants.size(); // Force Hibernate à charger la collection
+
+        return participants.stream()
+                .anyMatch(p -> p != null &&
+                        p.getUserId() != null &&
+                        p.getUserId().equals(userId) &&
+                        p.isActive());
+    }
+
+    public synchronized int getActiveParticipantCount() {
+        if (participants == null) {
+            return 0;
+        }
+
+        try {
+            // ✅ Utiliser stream directement sans copie
+            return (int) participants.stream()
+                    .filter(p -> p != null && p.isActive())
+                    .count();
+        } catch (Exception e) {
+            System.err.println("Error counting active participants: " + e.getMessage());
+            return 0;
+        }
     }
 
     public boolean isDirectConversation() {
@@ -115,14 +173,8 @@ public class Conversation {
         if (status == null) {
             status = ConversationStatus.ACTIVE;
         }
-        if (createdAt == null) {
-            createdAt = LocalDateTime.now();
+        if (version == null) {
+            version = 0L;
         }
-        updatedAt = LocalDateTime.now();
-    }
-
-    @PreUpdate
-    public void preUpdate() {
-        updatedAt = LocalDateTime.now();
     }
 }

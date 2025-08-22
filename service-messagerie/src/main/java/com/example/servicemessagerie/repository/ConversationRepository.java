@@ -3,6 +3,7 @@ package com.example.servicemessagerie.repository;
 import com.example.servicemessagerie.entity.Conversation;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -164,5 +165,14 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
             "WHERE c.id = :conversationId AND p.userId = :userId " +
             "AND p.isActive = true AND c.status = 'ACTIVE'")
     boolean canUserAccessConversation(@Param("conversationId") Long conversationId,
+
                                       @Param("userId") Long userId);
+
+    @EntityGraph(attributePaths = {"participants"})
+    Optional<Conversation> findWithParticipantsById(Long id);
+
+    @Query("SELECT p.userId FROM ConversationParticipant p WHERE p.conversation.id = :conversationId AND p.isActive = true")
+    List<Long> findUserIdsByConversationId(@Param("conversationId") Long conversationId);
+
+
 }

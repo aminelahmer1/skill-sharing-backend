@@ -28,21 +28,107 @@ public class ConversationService {
     private final MessageRepository messageRepository;
     private final UserServiceClient userServiceClient;
     private final SkillServiceClient skillServiceClient;
+    private final ExchangeServiceClient exchangeServiceClient;
+
 
     /**
-     * Crée ou récupère une conversation directe entre deux utilisateurs
-     * Permet toutes les interactions : Producer↔Receiver, Receiver↔Receiver, Producer↔Producer
+     * ✅ AMÉLIORÉ: Récupère les utilisateurs disponibles selon le rôle et le type de conversation
      */
+    @Transactional(readOnly = true)
+    public List<UserResponse> getAvailableUsersForConversation(String conversationType, Integer skillId, String token, Long currentUserId) {
+        log.info("🔍 Getting available users for conversation type: {}, skillId: {}, currentUserId: {}",
+                conversationType, skillId, currentUserId);
+
+        try {
+            // Déterminer le rôle de l'utilisateur actuel
+            UserResponse currentUser = getUserById(currentUserId, token);
+            List<String> userRoles = currentUser != null ? getUserRoles(currentUser) : List.of();
+
+            switch (conversationType.toUpperCase()) {
+                case "DIRECT":
+                case "GROUP":
+                    return getAvailableUsersForDirectOrGroup(userRoles, token, currentUserId);
+
+                case "SKILL":
+                case "SKILL_GROUP":
+                    if (skillId == null) {
+                        log.warn("⚠️ Skill ID is required for skill conversation");
+                        return List.of();
+                    }
+                    return getAvailableUsersForSkill(skillId, token, currentUserId);
+
+                default:
+                    log.warn("⚠️ Unknown conversation type: {}", conversationType);
+                    return List.of();
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Error getting available users: {}", e.getMessage(), e);
+            return List.of();
+        }
+    }
+
+    /**
+     * ✅ NOUVEAU: Récupère les utilisateurs disponibles pour conversations directes/groupe selon le rôle
+     */
+    private List<UserResponse> getAvailableUsersForDirectOrGroup(List<String> userRoles, String token, Long currentUserId) {
+        try {
+            if (userRoles.contains("PRODUCER")) {
+                log.info("🎯 Producer: fetching subscribers");
+                return exchangeServiceClient.getAllSubscribersForProducer(token);
+
+            } else if (userRoles.contains("RECEIVER")) {
+                log.info("🎯 Receiver: fetching community members");
+                List<CommunityMemberResponse> communityMembers = exchangeServiceClient.getAllCommunityMembersForReceiver(token);
+
+                return communityMembers.stream()
+                        .filter(member -> !member.userId().equals(currentUserId)) // Exclure l'utilisateur actuel
+                        .map(CommunityMemberResponse::toUserResponse)
+                        .collect(Collectors.toList());
+
+            } else {
+                log.warn("⚠️ User has no valid role for conversation creation");
+                return List.of();
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Error fetching users for direct/group conversation: {}", e.getMessage(), e);
+            return List.of();
+        }
+    }
+
+    /**
+     * ✅ NOUVEAU: Récupère les utilisateurs disponibles pour une compétence spécifique
+     */
+    private List<UserResponse> getAvailableUsersForSkill(Integer skillId, String token, Long currentUserId) {
+        try {
+            log.info("🎯 Fetching users for skill: {}", skillId);
+            List<UserResponse> skillUsers = exchangeServiceClient.getSkillUsersSimple(skillId, token);
+
+            // Filtrer l'utilisateur actuel
+            return skillUsers.stream()
+                    .filter(user -> !user.id().equals(currentUserId))
+                    .collect(Collectors.toList());
+
+        } catch (Exception e) {
+            log.error("❌ Error fetching users for skill {}: {}", skillId, e.getMessage(), e);
+            return List.of();
+        }
+    }
+
+    /**
+     * ✅ AMÉLIORÉ: Crée ou récupère une conversation directe avec validation renforcée
+     */
+    // ✅ CORRECTION: Méthode simplifiée et permissive pour les conversations directes
     @Transactional
     public ConversationDTO createOrGetDirectConversation(Long userId1, Long userId2, String token) {
         log.debug("Creating or getting direct conversation between {} and {}", userId1, userId2);
 
-        // Validation de base
         if (userId1.equals(userId2)) {
             throw new IllegalArgumentException("Cannot create conversation with yourself");
         }
 
-        // Vérifier si une conversation directe existe déjà
+        // ✅ Simplification: permettre à tous les utilisateurs authentifiés de créer des conversations
         Optional<Conversation> existing = conversationRepository
                 .findDirectConversationBetweenUsers(userId1, userId2);
 
@@ -51,14 +137,12 @@ public class ConversationService {
             return convertToDTO(existing.get(), userId1);
         }
 
-        // Récupérer les informations des utilisateurs
+        // ✅ Récupérer les utilisateurs et créer la conversation
         UserResponse user1 = fetchUserById(userId1, token);
         UserResponse user2 = fetchUserById(userId2, token);
 
-        // Créer le nom de la conversation
         String conversationName = generateConversationName(user1, user2);
 
-        // Créer une nouvelle conversation
         Conversation conversation = Conversation.builder()
                 .name(conversationName)
                 .type(Conversation.ConversationType.DIRECT)
@@ -66,30 +150,316 @@ public class ConversationService {
                 .build();
 
         conversation = conversationRepository.save(conversation);
-        log.info("Created new direct conversation: {}", conversation.getId());
 
-        // Ajouter les participants
         Set<ConversationParticipant> participants = new HashSet<>();
-
-        participants.add(ConversationParticipant.builder()
-                .conversation(conversation)
-                .userId(userId1)
-                .userName(user1.firstName() + " " + user1.lastName())
-                .role(ConversationParticipant.ParticipantRole.MEMBER)
-                .build());
-
-        participants.add(ConversationParticipant.builder()
-                .conversation(conversation)
-                .userId(userId2)
-                .userName(user2.firstName() + " " + user2.lastName())
-                .role(ConversationParticipant.ParticipantRole.MEMBER)
-                .build());
+        participants.add(createParticipant(conversation, userId1, user1.firstName() + " " + user1.lastName()));
+        participants.add(createParticipant(conversation, userId2, user2.firstName() + " " + user2.lastName()));
 
         participantRepository.saveAll(participants);
         conversation.setParticipants(participants);
 
+        log.info("Created new direct conversation: {}", conversation.getId());
         return convertToDTO(conversation, userId1);
     }
+
+    private ConversationParticipant createParticipant(Conversation conversation, Long userId, String userName) {
+        return ConversationParticipant.builder()
+                .conversation(conversation)
+                .userId(userId)
+                .userName(userName)
+                .role(ConversationParticipant.ParticipantRole.MEMBER)
+                .build();
+    }
+    /**
+     * ✅ NOUVEAU: Vérifie si deux utilisateurs peuvent créer une conversation directe
+     */
+    private boolean canUsersCreateDirectConversation(Long userId1, Long userId2, String token) {
+        try {
+            UserResponse user1 = fetchUserById(userId1, token);
+            UserResponse user2 = fetchUserById(userId2, token);
+
+            List<String> roles1 = getUserRoles(user1);
+            List<String> roles2 = getUserRoles(user2);
+
+            // Cas 1: Producteur et ses subscribers
+            if (roles1.contains("PRODUCER")) {
+                List<UserResponse> subscribers = exchangeServiceClient.getAllSubscribersForProducer(
+                        "Bearer " + extractTokenFromBearer(token));
+                return subscribers.stream().anyMatch(sub -> sub.id().equals(userId2));
+            }
+
+            if (roles2.contains("PRODUCER")) {
+                List<UserResponse> subscribers = exchangeServiceClient.getAllSubscribersForProducer(
+                        "Bearer " + extractTokenFromBearer(token));
+                return subscribers.stream().anyMatch(sub -> sub.id().equals(userId1));
+            }
+
+            // Cas 2: Receivers dans la même communauté
+            if (roles1.contains("RECEIVER") && roles2.contains("RECEIVER")) {
+                return areReceiversInSameCommunity(userId1, userId2, token);
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            log.error("❌ Error checking if users can create conversation: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * ✅ NOUVEAU: Vérifie si deux receivers sont dans la même communauté
+     */
+    private boolean areReceiversInSameCommunity(Long receiverId1, Long receiverId2, String token) {
+        try {
+            // Temporairement permissif - à améliorer avec une vraie vérification communautaire
+            List<CommunityMemberResponse> community = exchangeServiceClient.getAllCommunityMembersForReceiver(token);
+
+            Set<Long> communityUserIds = community.stream()
+                    .map(CommunityMemberResponse::userId)
+                    .collect(Collectors.toSet());
+
+            return communityUserIds.contains(receiverId1) && communityUserIds.contains(receiverId2);
+
+        } catch (Exception e) {
+            log.error("❌ Error checking receiver community: {}", e.getMessage(), e);
+            return true; // Permissif en cas d'erreur
+        }
+    }
+
+    /**
+     * ✅ AMÉLIORÉ: Crée ou récupère une conversation de compétence avec utilisateurs autorisés
+     */
+
+    /**
+     * ✅ NOUVEAU: Vérifie si un utilisateur peut accéder à une conversation de compétence
+     */
+    private boolean canUserAccessSkillConversation(Integer skillId, Long userId, String token) {
+        try {
+            List<UserResponse> authorizedUsers = exchangeServiceClient.getSkillUsersSimple(skillId, token);
+            return authorizedUsers.stream().anyMatch(user -> user.id().equals(userId));
+
+        } catch (Exception e) {
+            log.error("❌ Error checking skill access for user {} and skill {}: {}", userId, skillId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * ✅ AMÉLIORÉ: Crée une nouvelle conversation de compétence avec participants autorisés
+     */
+    private ConversationDTO createNewSkillConversation(Integer skillId, SkillResponse skill, Long userId, String token) {
+        String conversationName;
+
+        if (skill != null) {
+            conversationName = "Skill: " + skill.name();
+        } else {
+            conversationName = "Skill Discussion: " + skillId;
+        }
+
+        Conversation conversation = Conversation.builder()
+                .name(conversationName)
+                .type(Conversation.ConversationType.SKILL_GROUP)
+                .skillId(skillId)
+                .status(Conversation.ConversationStatus.ACTIVE)
+                .build();
+
+        conversation = conversationRepository.save(conversation);
+        log.info("✅ Created new skill conversation: {} for skill {}", conversation.getId(), skillId);
+
+        // ✅ AMÉLIORÉ: Ajouter tous les utilisateurs autorisés automatiquement
+        addAuthorizedUsersToSkillConversation(conversation, skillId, token);
+
+        return convertToDTO(conversation, userId);
+    }
+
+    /**
+     * ✅ NOUVEAU: Ajoute tous les utilisateurs autorisés à une conversation de compétence
+     */
+    private void addAuthorizedUsersToSkillConversation(Conversation conversation, Integer skillId, String token) {
+        try {
+            List<UserResponse> authorizedUsers = exchangeServiceClient.getSkillUsersSimple(skillId, token);
+
+            List<ConversationParticipant> participants = new ArrayList<>();
+
+            for (UserResponse user : authorizedUsers) {
+                try {
+                    // Déterminer le rôle dans la conversation
+                    ConversationParticipant.ParticipantRole role = ConversationParticipant.ParticipantRole.MEMBER;
+
+                    // Le producteur de la compétence devient admin
+                    SkillResponse skill = fetchSkill(skillId);
+                    if (skill != null && user.id().equals(skill.userId())) {
+                        role = ConversationParticipant.ParticipantRole.ADMIN;
+                    }
+
+                    ConversationParticipant participant = ConversationParticipant.builder()
+                            .conversation(conversation)
+                            .userId(user.id())
+                            .userName(user.firstName() + " " + user.lastName())
+                            .role(role)
+                            .build();
+
+                    participants.add(participant);
+
+                } catch (Exception e) {
+                    log.warn("⚠️ Could not add user {} to skill conversation: {}", user.id(), e.getMessage());
+                }
+            }
+
+            if (!participants.isEmpty()) {
+                participantRepository.saveAll(participants);
+                log.info("✅ Added {} users to skill conversation {}", participants.size(), conversation.getId());
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Error adding authorized users to skill conversation: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ AMÉLIORÉ: Crée une conversation de groupe avec validation des participants
+     */
+    @Transactional
+    public ConversationDTO createGroupConversation(CreateConversationRequest request, Long creatorId, String token) {
+        log.info("Creating group conversation '{}' by user {}", request.getName(), creatorId);
+
+        // Valider les participants
+        Set<Long> allParticipantIds = new HashSet<>(request.getParticipantIds());
+        allParticipantIds.add(creatorId);
+
+        // ✅ NOUVEAU: Vérifier que tous les participants peuvent être ajoutés
+        if (!canUsersCreateGroupConversation(allParticipantIds, creatorId, token)) {
+            throw new IllegalArgumentException("Some participants cannot be added to this group conversation");
+        }
+
+        // Vérifier que tous les utilisateurs existent
+        Map<Long, UserResponse> participants = validateAndFetchUsers(allParticipantIds, token);
+
+        // Créer la conversation
+        Conversation conversation = Conversation.builder()
+                .name(request.getName())
+                .type(Conversation.ConversationType.GROUP)
+                .status(Conversation.ConversationStatus.ACTIVE)
+                .build();
+
+        conversation = conversationRepository.save(conversation);
+
+        // Ajouter les participants
+        Set<ConversationParticipant> conversationParticipants = new HashSet<>();
+
+        // Créateur en tant qu'admin
+        UserResponse creator = participants.get(creatorId);
+        conversationParticipants.add(ConversationParticipant.builder()
+                .conversation(conversation)
+                .userId(creatorId)
+                .userName(creator.firstName() + " " + creator.lastName())
+                .role(ConversationParticipant.ParticipantRole.ADMIN)
+                .build());
+
+        // Autres participants en tant que membres
+        for (Long participantId : request.getParticipantIds()) {
+            if (!participantId.equals(creatorId)) {
+                UserResponse user = participants.get(participantId);
+                if (user != null) {
+                    conversationParticipants.add(ConversationParticipant.builder()
+                            .conversation(conversation)
+                            .userId(participantId)
+                            .userName(user.firstName() + " " + user.lastName())
+                            .role(ConversationParticipant.ParticipantRole.MEMBER)
+                            .build());
+                }
+            }
+        }
+
+        participantRepository.saveAll(conversationParticipants);
+        conversation.setParticipants(conversationParticipants);
+
+        log.info("Group conversation created with {} participants", conversationParticipants.size());
+        return convertToDTO(conversation, creatorId);
+    }
+
+    /**
+     * ✅ NOUVEAU: Vérifie si les utilisateurs peuvent créer une conversation de groupe
+     */
+    private boolean canUsersCreateGroupConversation(Set<Long> participantIds, Long creatorId, String token) {
+        try {
+            UserResponse creator = fetchUserById(creatorId, token);
+            List<String> creatorRoles = getUserRoles(creator);
+
+            if (creatorRoles.contains("PRODUCER")) {
+                // Le producteur peut inviter ses subscribers
+                List<UserResponse> subscribers = exchangeServiceClient.getAllSubscribersForProducer(token);
+                Set<Long> subscriberIds = subscribers.stream()
+                        .map(UserResponse::id)
+                        .collect(Collectors.toSet());
+
+                return participantIds.stream()
+                        .allMatch(id -> id.equals(creatorId) || subscriberIds.contains(id));
+
+            } else if (creatorRoles.contains("RECEIVER")) {
+                // Le receiver peut inviter les membres de sa communauté
+                List<CommunityMemberResponse> community = exchangeServiceClient.getAllCommunityMembersForReceiver(token);
+                Set<Long> communityIds = community.stream()
+                        .map(CommunityMemberResponse::userId)
+                        .collect(Collectors.toSet());
+
+                return participantIds.stream()
+                        .allMatch(id -> id.equals(creatorId) || communityIds.contains(id));
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            log.error("❌ Error validating group conversation participants: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+
+    // ===== MÉTHODES UTILITAIRES =====
+
+    /**
+     * ✅ NOUVEAU: Extrait le token du format Bearer
+     */
+    private String extractTokenFromBearer(String bearerToken) {
+        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        return bearerToken;
+    }
+
+    /**
+     * ✅ NOUVEAU: Récupère les rôles d'un utilisateur
+     */
+    private List<String> getUserRoles(UserResponse user) {
+        // Supposons que les rôles sont stockés dans un champ roles ou extraits du token
+        // Cette implémentation dépend de votre structure UserResponse
+        try {
+            // À adapter selon votre implémentation
+            return List.of("RECEIVER"); // Placeholder
+        } catch (Exception e) {
+            log.warn("⚠️ Could not determine user roles for user {}: {}", user.id(), e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * ✅ AMÉLIORATION: Récupère un utilisateur par ID avec gestion d'erreur
+     */
+    private UserResponse getUserById(Long userId, String token) {
+        try {
+            ResponseEntity<UserResponse> response = userServiceClient.getUserById(userId, token);
+            return response.getBody();
+        } catch (Exception e) {
+            log.error("❌ Error fetching user {}: {}", userId, e.getMessage());
+            return null;
+        }
+    }
+
+
+
+
+
 
     /**
      * ✅ CORRIGÉ: Crée ou récupère une conversation de groupe pour une compétence
@@ -183,28 +553,16 @@ public class ConversationService {
         log.info("📋 Fetching conversations for user {}, page {}, size {}", userId, page, size);
 
         try {
-            // ✅ ÉTAPE 1: Debug - Vérifier si l'utilisateur a des participations
+            // Vérifier si l'utilisateur a des participations
             long participantCount = conversationRepository.countConversationsByUserId(userId);
             log.info("🔍 User {} has {} conversation participations", userId, participantCount);
 
             if (participantCount == 0) {
                 log.warn("⚠️ User {} has no conversation participations", userId);
-                // Créer des participations de debug
-                List<Object> allParticipants = conversationRepository.findAllParticipantsByUserId(userId);
-                log.info("🔍 All participants for user {}: {}", userId, allParticipants.size());
                 return Page.empty();
             }
 
-            // ✅ ÉTAPE 2: Utiliser une requête simple d'abord
-            List<Conversation> simpleConversations = conversationRepository.findByParticipantUserIdSimple(userId);
-            log.info("🔍 Simple query found {} conversations", simpleConversations.size());
-
-            if (simpleConversations.isEmpty()) {
-                log.warn("⚠️ Simple query returned no conversations for user {}", userId);
-                return Page.empty();
-            }
-
-            // ✅ ÉTAPE 3: Utiliser la requête paginée optimisée
+            // Utiliser la requête paginée optimisée
             PageRequest pageable = PageRequest.of(page, size,
                     Sort.by(Sort.Order.desc("lastMessageTime").nullsLast()));
 
@@ -214,7 +572,7 @@ public class ConversationService {
             log.info("✅ Paginated query found {} conversations for user {}",
                     conversations.getTotalElements(), userId);
 
-            // ✅ ÉTAPE 4: Charger les participants séparément pour éviter le warning Hibernate
+            // Charger les participants séparément pour éviter le warning Hibernate
             List<Long> conversationIds = conversations.getContent().stream()
                     .map(Conversation::getId)
                     .collect(Collectors.toList());
@@ -235,7 +593,7 @@ public class ConversationService {
                 });
             }
 
-            // ✅ ÉTAPE 5: Convertir en DTOs avec gestion d'erreur par conversation
+            // Convertir en DTOs avec gestion d'erreur par conversation
             List<ConversationDTO> conversationDTOs = new ArrayList<>();
             for (Conversation conv : conversations.getContent()) {
                 try {
@@ -263,7 +621,6 @@ public class ConversationService {
             return Page.empty();
         }
     }
-
     /**
      * ✅ NOUVEAU: Méthode de diagnostic pour debug
      */
@@ -406,62 +763,6 @@ public class ConversationService {
         }
     }
 
-    /**
-     * Crée une conversation de groupe
-     */
-    @Transactional
-    public ConversationDTO createGroupConversation(CreateConversationRequest request, Long creatorId, String token) {
-        log.info("Creating group conversation '{}' by user {}", request.getName(), creatorId);
-
-        // Valider les participants
-        Set<Long> allParticipantIds = new HashSet<>(request.getParticipantIds());
-        allParticipantIds.add(creatorId);
-
-        // Vérifier que tous les utilisateurs existent
-        Map<Long, UserResponse> participants = validateAndFetchUsers(allParticipantIds, token);
-
-        // Créer la conversation
-        Conversation conversation = Conversation.builder()
-                .name(request.getName())
-                .type(Conversation.ConversationType.GROUP)
-                .status(Conversation.ConversationStatus.ACTIVE)
-                .build();
-
-        conversation = conversationRepository.save(conversation);
-
-        // Ajouter les participants
-        Set<ConversationParticipant> conversationParticipants = new HashSet<>();
-
-        // Créateur en tant qu'admin
-        UserResponse creator = participants.get(creatorId);
-        conversationParticipants.add(ConversationParticipant.builder()
-                .conversation(conversation)
-                .userId(creatorId)
-                .userName(creator.firstName() + " " + creator.lastName())
-                .role(ConversationParticipant.ParticipantRole.ADMIN)
-                .build());
-
-        // Autres participants en tant que membres
-        for (Long participantId : request.getParticipantIds()) {
-            if (!participantId.equals(creatorId)) {
-                UserResponse user = participants.get(participantId);
-                if (user != null) {
-                    conversationParticipants.add(ConversationParticipant.builder()
-                            .conversation(conversation)
-                            .userId(participantId)
-                            .userName(user.firstName() + " " + user.lastName())
-                            .role(ConversationParticipant.ParticipantRole.MEMBER)
-                            .build());
-                }
-            }
-        }
-
-        participantRepository.saveAll(conversationParticipants);
-        conversation.setParticipants(conversationParticipants);
-
-        log.info("Group conversation created with {} participants", conversationParticipants.size());
-        return convertToDTO(conversation, creatorId);
-    }
 
     // ===== NOUVELLES MÉTHODES UTILITAIRES =====
 

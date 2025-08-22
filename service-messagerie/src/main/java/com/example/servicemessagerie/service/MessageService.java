@@ -4,6 +4,7 @@ import com.example.servicemessagerie.dto.*;
 import com.example.servicemessagerie.entity.*;
 import com.example.servicemessagerie.repository.*;
 import com.example.servicemessagerie.feignclient.*;
+import jakarta.persistence.OptimisticLockException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -12,12 +13,15 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,64 +39,224 @@ public class MessageService {
     private final FileUploadService fileUploadService;
 
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, isolation = Isolation.READ_COMMITTED)
     public MessageDTO sendMessage(MessageRequest request, String token) {
         log.debug("Sending message to conversation {}", request.getConversationId());
 
-        // Récupérer la conversation
-        Conversation conversation = conversationRepository.findById(request.getConversationId())
-                .orElseThrow(() -> new IllegalArgumentException("Conversation not found"));
+        try {
+            // ✅ CORRECTION 1: Utiliser findWithParticipantsById pour charger participants en une fois
+            Conversation conversation = conversationRepository.findWithParticipantsById(request.getConversationId())
+                    .orElseThrow(() -> new IllegalArgumentException("Conversation not found"));
 
-        //  Vérification améliorée des permissions
-        boolean isParticipant = conversation.getParticipants().stream()
-                .anyMatch(p -> p.getUserId().equals(request.getSenderId()) && p.isActive());
+            // ✅ CORRECTION 2: Forcer le chargement complet des participants avant vérification
+            int participantCount = conversation.getParticipants().size(); // Force le chargement
+            log.debug("Conversation {} has {} participants", conversation.getId(), participantCount);
 
-        // Pour les conversations de compétence, permettre l'envoi même si pas encore participant
-        if (!isParticipant && conversation.getType() != Conversation.ConversationType.SKILL_GROUP) {
-            throw new SecurityException("User is not part of this conversation");
+            // ✅ CORRECTION 3: Utiliser la méthode isParticipant corrigée
+            boolean isParticipant = conversation.isParticipant(request.getSenderId());
+
+            // Pour les conversations de compétence, permettre l'envoi même si pas encore participant
+            if (!isParticipant && conversation.getType() != Conversation.ConversationType.SKILL_GROUP) {
+                log.warn("User {} is not a participant of conversation {}",
+                        request.getSenderId(), request.getConversationId());
+                throw new SecurityException("User is not part of this conversation");
+            }
+
+            // Récupérer les infos de l'expéditeur
+            UserResponse sender = fetchUserById(request.getSenderId(), token);
+
+            // Valider le type de message
+            Message.MessageType messageType = request.getType() != null
+                    ? Message.MessageType.valueOf(request.getType())
+                    : Message.MessageType.TEXT;
+
+            // Créer le message
+            Message message = Message.builder()
+                    .conversation(conversation)
+                    .senderId(request.getSenderId())
+                    .senderName(sender.firstName() + " " + sender.lastName())
+                    .content(request.getContent())
+                    .type(messageType)
+                    .attachmentUrl(request.getAttachmentUrl())
+                    .status(Message.MessageStatus.SENT)
+                    .build();
+
+            // Sauvegarder le message
+            message = messageRepository.save(message);
+            log.info("Message {} created successfully", message.getId());
+
+            // ✅ CORRECTION 4: Mettre à jour la conversation sans causer de conflits
+            try {
+                updateConversationLastMessage(conversation.getId(), request.getContent());
+            } catch (Exception e) {
+                log.warn("Failed to update last message for conversation {}: {}",
+                        conversation.getId(), e.getMessage());
+                // Ne pas faire échouer l'envoi si la mise à jour échoue
+            }
+
+            // Créer le DTO
+            MessageDTO messageDTO = convertToDTO(message, sender);
+
+            // ✅ CORRECTION 5: Créer des copies finales pour utilisation dans le lambda
+            final Long finalConversationId = conversation.getId();
+            final Message finalMessage = message;
+            final UserResponse finalSender = sender;
+            final MessageDTO finalMessageDTO = messageDTO;
+
+            // ✅ CORRECTION 6: Diffusion asynchrone pour éviter les blocages
+            CompletableFuture.runAsync(() -> {
+                try {
+                    broadcastMessage(finalConversationId, finalMessageDTO);
+                    sendPushNotifications(finalConversationId, finalMessage, finalSender);
+                } catch (Exception e) {
+                    log.error("Error in async message processing: {}", e.getMessage());
+                }
+            });
+
+            log.info("Message {} sent successfully to conversation {}",
+                    message.getId(), conversation.getId());
+            return messageDTO;
+
+        } catch (OptimisticLockException e) {
+            log.warn("Optimistic lock exception, retrying once...");
+            // Retry une fois en cas de conflit de version
+            try {
+                Thread.sleep(100); // Petit délai avant retry
+                return sendMessage(request, token);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted during retry", ie);
+            }
+        } catch (SecurityException | IllegalArgumentException e) {
+            // Propager les exceptions métier
+            throw e;
+        } catch (Exception e) {
+            log.error("Unexpected error sending message: {}", e.getMessage(), e);
+            throw new RuntimeException("Error sending message", e);
         }
-
-        // Récupérer les infos de l'expéditeur
-        UserResponse sender = fetchUserById(request.getSenderId(), token);
-
-        // Valider le type de message
-        Message.MessageType messageType = request.getType() != null
-                ? Message.MessageType.valueOf(request.getType())
-                : Message.MessageType.TEXT;
-
-        // Créer le message
-        Message message = Message.builder()
-                .conversation(conversation)
-                .senderId(request.getSenderId())
-                .senderName(sender.firstName() + " " + sender.lastName())
-                .content(request.getContent())
-                .type(messageType)
-                .attachmentUrl(request.getAttachmentUrl())
-                .status(Message.MessageStatus.SENT)
-                .build();
-
-        message = messageRepository.save(message);
-
-        // Mettre à jour la conversation
-        conversation.updateLastMessage(request.getContent());
-        conversationRepository.save(conversation);
-
-        // Créer le DTO
-        MessageDTO messageDTO = convertToDTO(message, sender);
-
-        // Diffuser le message via WebSocket
-        broadcastMessage(conversation, messageDTO);
-
-        // Envoyer les notifications Push aux utilisateurs hors ligne
-        sendPushNotificationsToOfflineUsers(conversation, message, sender);
-
-        // Marquer comme délivré
-        message.setStatus(Message.MessageStatus.DELIVERED);
-        messageRepository.save(message);
-
-        log.info("Message {} sent successfully to conversation {}", message.getId(), conversation.getId());
-        return messageDTO;
     }
+
+    private void sendPushNotifications(Long conversationId, Message message, UserResponse sender) {
+        try {
+            Conversation conversation = conversationRepository.findById(conversationId).orElse(null);
+            if (conversation == null) return;
+
+            // Charger les participants de manière sûre
+            Set<ConversationParticipant> participantsToNotify = new HashSet<>();
+            try {
+                conversation.getParticipants().size(); // Force le chargement
+                participantsToNotify.addAll(conversation.getParticipants());
+            } catch (Exception e) {
+                log.error("Error loading participants for notifications: {}", e.getMessage());
+                return;
+            }
+
+            participantsToNotify.stream()
+                    .filter(p -> !p.getUserId().equals(message.getSenderId()))
+                    .filter(ConversationParticipant::isNotificationEnabled)
+                    .forEach(participant -> {
+                        try {
+                            firebaseService.sendMessageNotification(
+                                    participant.getUserId(),
+                                    sender.firstName() + " " + sender.lastName(),
+                                    message.getContent(),
+                                    conversationId
+                            );
+                        } catch (Exception e) {
+                            log.error("Failed to send push notification to user {}: {}",
+                                    participant.getUserId(), e.getMessage());
+                        }
+                    });
+        } catch (Exception e) {
+            log.error("Error sending push notifications: {}", e.getMessage());
+        }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void updateConversationLastMessage(Long conversationId, String content) {
+        try {
+            // Utiliser une requête de mise à jour directe pour éviter les conflits
+            conversationRepository.findById(conversationId).ifPresent(conversation -> {
+                conversation.setLastMessage(content);
+                conversation.setLastMessageTime(LocalDateTime.now());
+                conversationRepository.save(conversation);
+            });
+        } catch (Exception e) {
+            log.warn("Failed to update last message for conversation {}: {}",
+                    conversationId, e.getMessage());
+        }
+    }
+
+
+    private void broadcastMessageAsync(Long conversationId, MessageDTO messageDTO) {
+        try {
+            // Récupérer la conversation avec ses participants
+            Conversation conversation = conversationRepository.findById(conversationId).orElse(null);
+            if (conversation == null) return;
+
+            // Créer une copie des participants pour éviter ConcurrentModificationException
+            Set<ConversationParticipant> participantsCopy = new HashSet<>(conversation.getParticipants());
+
+            // Diffuser à tous les participants
+            participantsCopy.stream()
+                    .filter(ConversationParticipant::isActive)
+                    .forEach(participant -> {
+                        try {
+                            messagingTemplate.convertAndSendToUser(
+                                    participant.getUserId().toString(),
+                                    "/queue/conversation/" + conversationId,
+                                    messageDTO
+                            );
+                        } catch (Exception e) {
+                            log.warn("Failed to send message to user {}: {}",
+                                    participant.getUserId(), e.getMessage());
+                        }
+                    });
+
+            // Diffuser sur le topic général
+            messagingTemplate.convertAndSend(
+                    "/topic/conversation/" + conversationId,
+                    messageDTO
+            );
+
+        } catch (Exception e) {
+            log.error("Error broadcasting message: {}", e.getMessage());
+        }
+    }
+
+    private void sendPushNotificationsAsync(Long conversationId, Message message, UserResponse sender) {
+        try {
+            Conversation conversation = conversationRepository.findById(conversationId).orElse(null);
+            if (conversation == null) return;
+
+            Set<ConversationParticipant> participantsCopy = new HashSet<>(conversation.getParticipants());
+
+            participantsCopy.stream()
+                    .filter(p -> !p.getUserId().equals(message.getSenderId()))
+                    .filter(ConversationParticipant::isNotificationEnabled)
+                    .forEach(participant -> {
+                        try {
+                            firebaseService.sendMessageNotification(
+                                    participant.getUserId(),
+                                    sender.firstName() + " " + sender.lastName(),
+                                    message.getContent(),
+                                    conversationId
+                            );
+                        } catch (Exception e) {
+                            log.error("Failed to send push notification to user {}: {}",
+                                    participant.getUserId(), e.getMessage());
+                        }
+                    });
+        } catch (Exception e) {
+            log.error("Error sending push notifications: {}", e.getMessage());
+        }
+    }
+
+
+
+
+
+
 
     /**
      * Récupère les messages d'une conversation avec pagination
@@ -311,38 +475,59 @@ public class MessageService {
         }
     }
 
-    private void broadcastMessage(Conversation conversation, MessageDTO messageDTO) {
+    private void broadcastMessage(Long conversationId, MessageDTO messageDTO) {
         try {
-            // Diffuser à tous les participants via leur file personnelle
-            conversation.getParticipants().stream()
+            // Récupérer une nouvelle instance de la conversation pour éviter les problèmes de session
+            Conversation conversation = conversationRepository.findById(conversationId).orElse(null);
+            if (conversation == null) {
+                log.warn("Conversation {} not found for broadcast", conversationId);
+                return;
+            }
+
+            // Charger les participants de manière sûre
+            Set<ConversationParticipant> participantsToNotify = new HashSet<>();
+            try {
+                // Forcer le chargement complet
+                conversation.getParticipants().size();
+                participantsToNotify.addAll(conversation.getParticipants());
+            } catch (Exception e) {
+                log.error("Error loading participants for broadcast: {}", e.getMessage());
+                return;
+            }
+
+            // Diffuser à tous les participants actifs
+            participantsToNotify.stream()
                     .filter(ConversationParticipant::isActive)
                     .forEach(participant -> {
                         try {
-                            // Envoyer à l'utilisateur spécifique
                             messagingTemplate.convertAndSendToUser(
                                     participant.getUserId().toString(),
-                                    "/queue/conversation/" + conversation.getId(),
+                                    "/queue/conversation/" + conversationId,
                                     messageDTO
                             );
+                            log.debug("Message sent to user {} via WebSocket", participant.getUserId());
                         } catch (Exception e) {
                             log.warn("Failed to send message to user {}: {}",
                                     participant.getUserId(), e.getMessage());
                         }
                     });
 
-            // Diffuser aussi sur le topic général de la conversation
+            // Diffuser sur le topic général
             messagingTemplate.convertAndSend(
-                    "/topic/conversation/" + conversation.getId(),
+                    "/topic/conversation/" + conversationId,
                     messageDTO
             );
 
         } catch (Exception e) {
-            log.error("Error broadcasting message: {}", e.getMessage());
+            log.error("Error broadcasting message: {}", e.getMessage(), e);
         }
     }
 
     private void sendPushNotificationsToOfflineUsers(Conversation conversation, Message message, UserResponse sender) {
-        conversation.getParticipants().stream()
+        // ✅ CORRECTION: Créer une copie défensive
+        Set<ConversationParticipant> participantsCopy = new HashSet<>(conversation.getParticipants());
+
+        participantsCopy.stream()
                 .filter(p -> !p.getUserId().equals(message.getSenderId()))
                 .filter(ConversationParticipant::isNotificationEnabled)
                 .forEach(participant -> {
@@ -388,17 +573,12 @@ public class MessageService {
     }
 
     private MessageDTO convertToDTO(Message message, UserResponse sender) {
-        String senderAvatar = null;
-        if (sender != null && sender.profileImageUrl() != null) {
-            senderAvatar = sender.profileImageUrl();
-        }
-
         return MessageDTO.builder()
                 .id(message.getId())
                 .conversationId(message.getConversation().getId())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
-                .senderAvatar(senderAvatar)
+                .senderAvatar(sender != null ? sender.profileImageUrl() : null)
                 .content(message.getContent())
                 .type(message.getType().name())
                 .status(message.getStatus().name())
@@ -407,8 +587,6 @@ public class MessageService {
                 .readAt(message.getReadAt())
                 .editedAt(message.getEditedAt())
                 .isDeleted(message.isDeleted())
-                .canEdit(message.getSenderId().equals(sender != null ? sender.id() : null))
-                .canDelete(message.getSenderId().equals(sender != null ? sender.id() : null))
                 .build();
     }
 }
