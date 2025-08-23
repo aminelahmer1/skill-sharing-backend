@@ -1,14 +1,17 @@
 package com.example.servicemessagerie.repository;
 
 import com.example.servicemessagerie.entity.Conversation;
+import com.example.servicemessagerie.entity.ConversationParticipant;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,15 +22,15 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
      * ✅ CORRIGÉ: Requête optimisée pour éviter le warning Hibernate
      * Sépare la récupération des conversations et leurs participants
      */
-    @Query("SELECT DISTINCT c FROM Conversation c " +
+    // REMPLACER findByParticipantUserId par :
+    @Query("SELECT c FROM Conversation c " +
             "WHERE c.id IN (" +
-            "    SELECT DISTINCT p.conversation.id FROM ConversationParticipant p " +
+            "    SELECT p.conversation.id FROM ConversationParticipant p " +
             "    WHERE p.userId = :userId AND p.isActive = true" +
             ") " +
             "AND c.status = 'ACTIVE' " +
-            "ORDER BY c.lastMessageTime DESC NULLS LAST, c.createdAt DESC")
+            "ORDER BY c.lastMessageTime DESC NULLS LAST")
     Page<Conversation> findByParticipantUserId(@Param("userId") Long userId, Pageable pageable);
-
     /**
      * ✅ NOUVEAU: Méthode pour récupérer les conversations avec participants
      */
@@ -174,5 +177,15 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
     @Query("SELECT p.userId FROM ConversationParticipant p WHERE p.conversation.id = :conversationId AND p.isActive = true")
     List<Long> findUserIdsByConversationId(@Param("conversationId") Long conversationId);
 
+    @Modifying
+    @Query("UPDATE Conversation c SET c.lastMessage = :content, c.lastMessageTime = :time " +
+            "WHERE c.id = :conversationId")
+    void updateLastMessage(@Param("conversationId") Long conversationId,
+                           @Param("content") String content,
+                           @Param("time") LocalDateTime time);
 
+    // ✅ REQUÊTE SIMPLE POUR PARTICIPANTS
+
+    @Query("SELECT p FROM ConversationParticipant p WHERE p.conversation.id = :conversationId AND p.isActive = true")
+    List<ConversationParticipant> findActiveParticipantsByConversationId(@Param("conversationId") Long conversationId);
 }

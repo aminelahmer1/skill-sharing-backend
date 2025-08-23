@@ -873,88 +873,74 @@ public class ConversationService {
     /**
      *  Conversion vers DTO avec gestion correcte des permissions
      */
-    // ConversationService.java - CORRECTION
+
     private ConversationDTO convertToDTO(Conversation conversation, Long currentUserId) {
         try {
-            log.debug("Converting conversation {} to DTO for user {}", conversation.getId(), currentUserId);
+            // ✅ RÉCUPÉRATION SÉPARÉE DES PARTICIPANTS
+            List<ConversationParticipant> participants =
+                    participantRepository.findActiveParticipantsByConversationId(conversation.getId());
 
-            // Compter les messages non lus
+            List<ParticipantDTO> participantDTOs = participants.stream()
+                    .map(p -> ParticipantDTO.builder()
+                            .userId(p.getUserId())
+                            .userName(p.getUserName())
+                            .role(p.getRole().name())
+                            .isOnline(false)
+                            .build())
+                    .collect(Collectors.toList());
+
+            // ✅ UNREAD COUNT SAFE
             int unreadCount = 0;
             try {
                 unreadCount = messageRepository.countUnreadInConversation(conversation.getId(), currentUserId);
             } catch (Exception e) {
-                log.warn("Could not get unread count for conversation {}: {}", conversation.getId(), e.getMessage());
-            }
-
-            // Récupérer le dernier message
-            Message lastMessage = messageRepository
-                    .findTopByConversationIdOrderBySentAtDesc(conversation.getId())
-                    .orElse(null);
-
-            // Créer la liste des participants - CORRECTION IMPORTANTE
-            List<ParticipantDTO> participants = new ArrayList<>();
-            if (conversation.getParticipants() != null) {
-                participants = conversation.getParticipants().stream()
-                        .filter(p -> p != null && p.isActive())
-                        .map(p -> ParticipantDTO.builder()
-                                .userId(p.getUserId())
-                                .userName(p.getUserName() != null ? p.getUserName() : "Unknown")
-                                .role(p.getRole() != null ? p.getRole().name() : "MEMBER")
-                                .isOnline(false)
-                                .build())
-                        .collect(Collectors.toList());
-            }
-
-            // Déterminer les permissions
-            boolean canSendMessage = true;
-            boolean isAdmin = false;
-
-            if (currentUserId != null && conversation.getParticipants() != null) {
-                Optional<ConversationParticipant> userParticipant = conversation.getParticipants().stream()
-                        .filter(p -> p != null && p.getUserId() != null && p.getUserId().equals(currentUserId) && p.isActive())
-                        .findFirst();
-
-                if (userParticipant.isPresent()) {
-                    canSendMessage = true;
-                    isAdmin = userParticipant.get().getRole() == ConversationParticipant.ParticipantRole.ADMIN;
-                } else if (conversation.getType() == Conversation.ConversationType.SKILL_GROUP) {
-                    canSendMessage = true;
-                } else {
-                    canSendMessage = false;
-                }
-            }
-
-            if (conversation.getStatus() != Conversation.ConversationStatus.ACTIVE) {
-                canSendMessage = false;
+                log.warn("Could not get unread count: {}", e.getMessage());
             }
 
             return ConversationDTO.builder()
                     .id(conversation.getId())
-                    .name(conversation.getName() != null ? conversation.getName() : "Unnamed Conversation")
-                    .type(conversation.getType() != null ? conversation.getType().name() : "DIRECT")
-                    .status(conversation.getStatus() != null ? conversation.getStatus().name() : "ACTIVE")
+                    .name(conversation.getName())
+                    .type(conversation.getType().name())
+                    .status(conversation.getStatus().name())
                     .skillId(conversation.getSkillId())
-                    .participants(participants)
-                    .lastMessage(lastMessage != null ? lastMessage.getContent() : null)
+                    .participants(participantDTOs)
+                    .lastMessage(conversation.getLastMessage())
                     .lastMessageTime(conversation.getLastMessageTime())
                     .unreadCount(unreadCount)
                     .createdAt(conversation.getCreatedAt())
-                    .canSendMessage(canSendMessage)
-                    .isAdmin(isAdmin)
+                    .canSendMessage(true)
+                    .isAdmin(isUserAdmin(participants, currentUserId))
                     .build();
 
         } catch (Exception e) {
-            log.error("❌ CRITICAL ERROR converting conversation {} to DTO: {}", conversation.getId(), e.getMessage(), e);
-            // Retourner un DTO minimal pour éviter de casser toute l'application
-            return ConversationDTO.builder()
-                    .id(conversation.getId())
-                    .name("Error loading conversation")
-                    .type("DIRECT")
-                    .status("ACTIVE")
-                    .participants(new ArrayList<>())
-                    .unreadCount(0)
-                    .canSendMessage(false)
-                    .isAdmin(false)
-                    .build();
+            log.error("❌ Error converting conversation: {}", e.getMessage());
+            return createMinimalDTO(conversation);
         }
-    }}
+    }
+
+    // ✅ CORRIGER isUserAdmin
+    private boolean isUserAdmin(List<ConversationParticipant> participants, Long userId) {
+        if (userId == null || participants == null) return false;
+
+        return participants.stream()
+                .anyMatch(p -> p.getUserId().equals(userId) &&
+                        p.getRole() == ConversationParticipant.ParticipantRole.ADMIN &&
+                        p.isActive());
+    }
+
+    // ✅ DTO MINIMAL EN CAS D'ERREUR
+    private ConversationDTO createMinimalDTO(Conversation conversation) {
+        return ConversationDTO.builder()
+                .id(conversation.getId())
+                .name(conversation.getName())
+                .type(conversation.getType().name())
+                .status(conversation.getStatus().name())
+                .participants(new ArrayList<>())
+                .unreadCount(0)
+                .canSendMessage(true)
+                .isAdmin(false)
+                .build();
+    }
+
+
+}

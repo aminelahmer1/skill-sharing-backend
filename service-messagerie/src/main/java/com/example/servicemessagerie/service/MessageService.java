@@ -44,98 +44,267 @@ public class MessageService {
         log.debug("Sending message to conversation {}", request.getConversationId());
 
         try {
-            // ✅ CORRECTION 1: Utiliser findWithParticipantsById pour charger participants en une fois
-            Conversation conversation = conversationRepository.findWithParticipantsById(request.getConversationId())
-                    .orElseThrow(() -> new IllegalArgumentException("Conversation not found"));
-
-            // ✅ CORRECTION 2: Forcer le chargement complet des participants avant vérification
-            int participantCount = conversation.getParticipants().size(); // Force le chargement
-            log.debug("Conversation {} has {} participants", conversation.getId(), participantCount);
-
-            // ✅ CORRECTION 3: Utiliser la méthode isParticipant corrigée
-            boolean isParticipant = conversation.isParticipant(request.getSenderId());
-
-            // Pour les conversations de compétence, permettre l'envoi même si pas encore participant
-            if (!isParticipant && conversation.getType() != Conversation.ConversationType.SKILL_GROUP) {
-                log.warn("User {} is not a participant of conversation {}",
-                        request.getSenderId(), request.getConversationId());
-                throw new SecurityException("User is not part of this conversation");
+            // ✅ VALIDATION DES PARAMÈTRES
+            if (request.getConversationId() == null) {
+                throw new IllegalArgumentException("Conversation ID is required");
+            }
+            if (request.getSenderId() == null) {
+                throw new IllegalArgumentException("Sender ID is required");
+            }
+            if (request.getContent() == null || request.getContent().trim().isEmpty()) {
+                throw new IllegalArgumentException("Message content cannot be empty");
             }
 
-            // Récupérer les infos de l'expéditeur
+            // ✅ RÉCUPÉRER LA CONVERSATION AVEC PARTICIPANTS
+            Conversation conversation = conversationRepository.findById(request.getConversationId())
+                    .orElseThrow(() -> new IllegalArgumentException("Conversation not found: " + request.getConversationId()));
+
+            // ✅ VÉRIFIER LE STATUT DE LA CONVERSATION
+            if (conversation.getStatus() != Conversation.ConversationStatus.ACTIVE) {
+                throw new IllegalArgumentException("Cannot send message to inactive conversation");
+            }
+
+            // ✅ LOGIQUE DE PERMISSION SELON LE TYPE
+            if (conversation.getType() == Conversation.ConversationType.SKILL_GROUP) {
+                // Pour SKILL_GROUP : auto-join si pas participant
+                handleSkillGroupParticipation(conversation, request.getSenderId(), token);
+            } else {
+                // Pour DIRECT/GROUP : vérifier participation stricte
+                boolean isParticipant = participantRepository
+                        .existsByConversationIdAndUserId(conversation.getId(), request.getSenderId());
+
+                if (!isParticipant) {
+                    log.warn("User {} is not a participant of conversation {}",
+                            request.getSenderId(), request.getConversationId());
+                    throw new SecurityException("User is not authorized to send messages to this conversation");
+                }
+            }
+
+            // ✅ RÉCUPÉRER LES INFOS DE L'EXPÉDITEUR
             UserResponse sender = fetchUserById(request.getSenderId(), token);
+            String senderFullName = (sender.firstName() + " " + sender.lastName()).trim();
+            if (senderFullName.isEmpty()) {
+                senderFullName = sender.username();
+            }
 
-            // Valider le type de message
-            Message.MessageType messageType = request.getType() != null
-                    ? Message.MessageType.valueOf(request.getType())
-                    : Message.MessageType.TEXT;
+            // ✅ VALIDER ET CRÉER LE MESSAGE
+            Message.MessageType messageType = parseMessageType(request.getType());
 
-            // Créer le message
             Message message = Message.builder()
                     .conversation(conversation)
                     .senderId(request.getSenderId())
-                    .senderName(sender.firstName() + " " + sender.lastName())
-                    .content(request.getContent())
+                    .senderName(senderFullName)
+                    .content(request.getContent().trim())
                     .type(messageType)
                     .attachmentUrl(request.getAttachmentUrl())
                     .status(Message.MessageStatus.SENT)
                     .build();
 
-            // Sauvegarder le message
+            // ✅ SAUVEGARDER LE MESSAGE
             message = messageRepository.save(message);
-            log.info("Message {} created successfully", message.getId());
+            log.info("✅ Message {} created successfully", message.getId());
 
-            // ✅ CORRECTION 4: Mettre à jour la conversation sans causer de conflits
-            try {
-                updateConversationLastMessage(conversation.getId(), request.getContent());
-            } catch (Exception e) {
-                log.warn("Failed to update last message for conversation {}: {}",
-                        conversation.getId(), e.getMessage());
-                // Ne pas faire échouer l'envoi si la mise à jour échoue
-            }
+            // ✅ METTRE À JOUR LA CONVERSATION (transaction séparée)
+            updateConversationLastMessageSafely(conversation.getId(), request.getContent().trim());
 
-            // Créer le DTO
+            // ✅ CRÉER LE DTO DE RÉPONSE
             MessageDTO messageDTO = convertToDTO(message, sender);
 
-            // ✅ CORRECTION 5: Créer des copies finales pour utilisation dans le lambda
-            final Long finalConversationId = conversation.getId();
-            final Message finalMessage = message;
-            final UserResponse finalSender = sender;
-            final MessageDTO finalMessageDTO = messageDTO;
+            // ✅ DIFFUSION ASYNCHRONE (ne pas bloquer la réponse)
+            broadcastMessageAsync(conversation.getId(), messageDTO, conversation.getParticipants(), sender);
 
-            // ✅ CORRECTION 6: Diffusion asynchrone pour éviter les blocages
-            CompletableFuture.runAsync(() -> {
-                try {
-                    broadcastMessage(finalConversationId, finalMessageDTO);
-                    sendPushNotifications(finalConversationId, finalMessage, finalSender);
-                } catch (Exception e) {
-                    log.error("Error in async message processing: {}", e.getMessage());
-                }
-            });
-
-            log.info("Message {} sent successfully to conversation {}",
+            log.info("✅ Message {} sent successfully to conversation {}",
                     message.getId(), conversation.getId());
+
             return messageDTO;
 
-        } catch (OptimisticLockException e) {
-            log.warn("Optimistic lock exception, retrying once...");
-            // Retry une fois en cas de conflit de version
-            try {
-                Thread.sleep(100); // Petit délai avant retry
-                return sendMessage(request, token);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Interrupted during retry", ie);
-            }
         } catch (SecurityException | IllegalArgumentException e) {
-            // Propager les exceptions métier
+            log.error("❌ Business error sending message: {}", e.getMessage());
             throw e;
         } catch (Exception e) {
-            log.error("Unexpected error sending message: {}", e.getMessage(), e);
-            throw new RuntimeException("Error sending message", e);
+            log.error("❌ Unexpected error sending message: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to send message: " + e.getMessage(), e);
         }
     }
 
+    // ✅ MÉTHODE HELPER : Gérer la participation aux conversations de compétence
+    private void handleSkillGroupParticipation(Conversation conversation, Long userId, String token) {
+        try {
+            boolean isAlreadyParticipant = participantRepository
+                    .existsByConversationIdAndUserId(conversation.getId(), userId);
+
+            if (!isAlreadyParticipant) {
+                log.info("🔄 Auto-joining user {} to skill conversation {}", userId, conversation.getId());
+
+                // Récupérer les infos utilisateur
+                UserResponse user = fetchUserById(userId, token);
+                String userName = (user.firstName() + " " + user.lastName()).trim();
+                if (userName.isEmpty()) {
+                    userName = user.username();
+                }
+
+                // Créer le participant
+                ConversationParticipant participant = ConversationParticipant.builder()
+                        .conversation(conversation)
+                        .userId(userId)
+                        .userName(userName)
+                        .role(ConversationParticipant.ParticipantRole.MEMBER)
+                        .isActive(true)
+                        .notificationEnabled(true)
+                        .build();
+
+                participantRepository.save(participant);
+                log.info("✅ User {} successfully joined skill conversation {}", userId, conversation.getId());
+            }
+        } catch (Exception e) {
+            log.error("❌ Failed to add user {} to skill conversation {}: {}",
+                    userId, conversation.getId(), e.getMessage());
+            throw new SecurityException("Cannot join skill conversation: " + e.getMessage());
+        }
+    }
+
+    // ✅ MÉTHODE HELPER : Parser le type de message de façon sécurisée
+    private Message.MessageType parseMessageType(String type) {
+        if (type == null || type.trim().isEmpty()) {
+            return Message.MessageType.TEXT;
+        }
+
+        try {
+            return Message.MessageType.valueOf(type.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.warn("⚠️ Invalid message type '{}', defaulting to TEXT", type);
+            return Message.MessageType.TEXT;
+        }
+    }
+
+    // ✅ MÉTHODE HELPER : Mise à jour sécurisée du dernier message
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void updateConversationLastMessageSafely(Long conversationId, String content) {
+        try {
+            conversationRepository.findById(conversationId).ifPresent(conv -> {
+                conv.setLastMessage(content.length() > 255 ? content.substring(0, 252) + "..." : content);
+                conv.setLastMessageTime(LocalDateTime.now());
+                conversationRepository.save(conv);
+            });
+        } catch (Exception e) {
+            log.warn("⚠️ Failed to update last message for conversation {}: {}", conversationId, e.getMessage());
+            // Ne pas propager l'erreur pour ne pas faire échouer l'envoi
+        }
+    }
+
+    // ✅ MÉTHODE HELPER : Diffusion asynchrone optimisée
+    private void broadcastMessageAsync(Long conversationId, MessageDTO messageDTO,
+                                       Set<ConversationParticipant> participants, UserResponse sender) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                // Diffusion WebSocket
+                broadcastMessageToParticipants(conversationId, messageDTO, participants);
+
+                // Notifications push (seulement aux utilisateurs hors ligne)
+                sendPushNotificationsToOfflineUsers(conversationId, messageDTO, participants, sender);
+
+            } catch (Exception e) {
+                log.error("❌ Error in async message broadcasting: {}", e.getMessage());
+            }
+        });
+    }
+
+    // ✅ MÉTHODE HELPER : Diffusion WebSocket sécurisée
+    private void broadcastMessageToParticipants(Long conversationId, MessageDTO messageDTO,
+                                                Set<ConversationParticipant> participants) {
+        try {
+            // Topic général pour la conversation
+            messagingTemplate.convertAndSend("/topic/conversation/" + conversationId, messageDTO);
+
+            // Messages personnalisés pour chaque participant
+            if (participants != null) {
+                participants.stream()
+                        .filter(p -> p != null && p.isActive())
+                        .forEach(participant -> {
+                            try {
+                                messagingTemplate.convertAndSendToUser(
+                                        participant.getUserId().toString(),
+                                        "/queue/messages",
+                                        messageDTO
+                                );
+                            } catch (Exception e) {
+                                log.warn("⚠️ Failed to send message to user {}: {}",
+                                        participant.getUserId(), e.getMessage());
+                            }
+                        });
+            }
+
+            log.debug("📡 Message broadcasted to conversation {}", conversationId);
+
+        } catch (Exception e) {
+            log.error("❌ Error broadcasting message via WebSocket: {}", e.getMessage());
+        }
+    }
+
+    // ✅ MÉTHODE HELPER : Notifications push intelligentes
+    private void sendPushNotificationsToOfflineUsers(Long conversationId, MessageDTO messageDTO,
+                                                     Set<ConversationParticipant> participants, UserResponse sender) {
+        try {
+            if (participants == null) return;
+
+            participants.stream()
+                    .filter(p -> p != null && p.isActive() && p.isNotificationEnabled())
+                    .filter(p -> !p.getUserId().equals(messageDTO.getSenderId())) // Pas à l'expéditeur
+                    .forEach(participant -> {
+                        try {
+                            // Vérifier si l'utilisateur est en ligne (optionnel)
+                            // boolean isOnline = checkIfUserIsOnline(participant.getUserId());
+                            // if (!isOnline) {
+                            firebaseService.sendMessageNotification(
+                                    participant.getUserId(),
+                                    sender.firstName() + " " + sender.lastName(),
+                                    truncateForNotification(messageDTO.getContent()),
+                                    conversationId
+                            );
+                            // }
+                        } catch (Exception e) {
+                            log.warn("⚠️ Failed to send push notification to user {}: {}",
+                                    participant.getUserId(), e.getMessage());
+                        }
+                    });
+
+        } catch (Exception e) {
+            log.error("❌ Error sending push notifications: {}", e.getMessage());
+        }
+    }
+
+    // ✅ MÉTHODE HELPER : Tronquer le contenu pour les notifications
+    private String truncateForNotification(String content) {
+        if (content == null) return "";
+
+        final int MAX_LENGTH = 100;
+        if (content.length() <= MAX_LENGTH) {
+            return content;
+        }
+
+        return content.substring(0, MAX_LENGTH - 3) + "...";
+    }
+
+    // ✅ MÉTHODE HELPER : Conversion DTO sécurisée
+    private MessageDTO convertToDTO(Message message, UserResponse sender) {
+        return MessageDTO.builder()
+                .id(message.getId())
+                .conversationId(message.getConversation().getId())
+                .senderId(message.getSenderId())
+                .senderName(message.getSenderName())
+                .senderAvatar(sender != null ? sender.profileImageUrl() : null)
+                .content(message.getContent())
+                .type(message.getType().name())
+                .status(message.getStatus().name())
+                .attachmentUrl(message.getAttachmentUrl())
+                .sentAt(message.getSentAt())
+                .readAt(message.getReadAt())
+                .editedAt(message.getEditedAt())
+                .isDeleted(message.isDeleted())
+                .canEdit(message.getSenderId().equals(message.getSenderId())) // Logique à ajuster selon besoins
+                .canDelete(message.getSenderId().equals(message.getSenderId())) // Logique à ajuster selon besoins
+                .build();
+    }
     private void sendPushNotifications(Long conversationId, Message message, UserResponse sender) {
         try {
             Conversation conversation = conversationRepository.findById(conversationId).orElse(null);
@@ -572,21 +741,5 @@ public class MessageService {
         }
     }
 
-    private MessageDTO convertToDTO(Message message, UserResponse sender) {
-        return MessageDTO.builder()
-                .id(message.getId())
-                .conversationId(message.getConversation().getId())
-                .senderId(message.getSenderId())
-                .senderName(message.getSenderName())
-                .senderAvatar(sender != null ? sender.profileImageUrl() : null)
-                .content(message.getContent())
-                .type(message.getType().name())
-                .status(message.getStatus().name())
-                .attachmentUrl(message.getAttachmentUrl())
-                .sentAt(message.getSentAt())
-                .readAt(message.getReadAt())
-                .editedAt(message.getEditedAt())
-                .isDeleted(message.isDeleted())
-                .build();
-    }
+
 }
