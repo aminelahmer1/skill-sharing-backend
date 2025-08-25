@@ -64,3 +64,9 @@ service-messagerie/src/main/resources/firebase-service-account.json
 *.pem
 *.key
 *.crt
+
+
+### Ignorer les dossiers d'uploads ###
+uploads/
+skill-uploads/
+message-uploads/
