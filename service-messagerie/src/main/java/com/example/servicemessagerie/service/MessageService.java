@@ -1,3 +1,7 @@
+
+
+
+
 package com.example.servicemessagerie.service;
 
 import com.example.servicemessagerie.dto.*;
@@ -193,15 +197,21 @@ public class MessageService {
     }
 
     // ✅ MÉTHODE HELPER : Diffusion asynchrone optimisée
+    // Dans MessageService.java - MODIFIER broadcastMessageAsync()
     private void broadcastMessageAsync(Long conversationId, MessageDTO messageDTO,
                                        Set<ConversationParticipant> participants, UserResponse sender) {
         CompletableFuture.runAsync(() -> {
             try {
-                // Diffusion WebSocket
-                broadcastMessageToParticipants(conversationId, messageDTO, participants);
+                // NE PAS renvoyer le message à l'expéditeur via WebSocket
+                Set<ConversationParticipant> recipientsOnly = participants.stream()
+                        .filter(p -> !p.getUserId().equals(messageDTO.getSenderId()))
+                        .collect(Collectors.toSet());
 
-                // Notifications push (seulement aux utilisateurs hors ligne)
-                sendPushNotificationsToOfflineUsers(conversationId, messageDTO, participants, sender);
+                // Diffusion WebSocket aux destinataires seulement
+                broadcastMessageToRecipients(conversationId, messageDTO, recipientsOnly);
+
+                // Notifications push
+                sendPushNotificationsToOfflineUsers(conversationId, messageDTO, recipientsOnly, sender);
 
             } catch (Exception e) {
                 log.error("❌ Error in async message broadcasting: {}", e.getMessage());
@@ -209,35 +219,27 @@ public class MessageService {
         });
     }
 
-    // ✅ MÉTHODE HELPER : Diffusion WebSocket sécurisée
-    private void broadcastMessageToParticipants(Long conversationId, MessageDTO messageDTO,
-                                                Set<ConversationParticipant> participants) {
+    private void broadcastMessageToRecipients(Long conversationId, MessageDTO messageDTO,
+                                              Set<ConversationParticipant> recipients) {
         try {
-            // Topic général pour la conversation
-            messagingTemplate.convertAndSend("/topic/conversation/" + conversationId, messageDTO);
-
-            // Messages personnalisés pour chaque participant
-            if (participants != null) {
-                participants.stream()
-                        .filter(p -> p != null && p.isActive())
-                        .forEach(participant -> {
-                            try {
-                                messagingTemplate.convertAndSendToUser(
-                                        participant.getUserId().toString(),
-                                        "/queue/messages",
-                                        messageDTO
-                                );
-                            } catch (Exception e) {
-                                log.warn("⚠️ Failed to send message to user {}: {}",
-                                        participant.getUserId(), e.getMessage());
-                            }
-                        });
-            }
-
-            log.debug("📡 Message broadcasted to conversation {}", conversationId);
+            // Messages personnalisés pour chaque destinataire (pas l'expéditeur)
+            recipients.stream()
+                    .filter(p -> p != null && p.isActive())
+                    .forEach(participant -> {
+                        try {
+                            messagingTemplate.convertAndSendToUser(
+                                    participant.getUserId().toString(),
+                                    "/queue/conversation",
+                                    messageDTO
+                            );
+                        } catch (Exception e) {
+                            log.warn("Failed to send to user {}: {}",
+                                    participant.getUserId(), e.getMessage());
+                        }
+                    });
 
         } catch (Exception e) {
-            log.error("❌ Error broadcasting message via WebSocket: {}", e.getMessage());
+            log.error("Error broadcasting: {}", e.getMessage());
         }
     }
 

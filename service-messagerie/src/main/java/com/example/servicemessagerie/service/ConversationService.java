@@ -30,7 +30,7 @@ public class ConversationService {
     private final SkillServiceClient skillServiceClient;
     private final ExchangeServiceClient exchangeServiceClient;
 
-
+    private final ConversationWebSocketService webSocketService;
     /**
      * ✅ AMÉLIORÉ: Récupère les utilisateurs disponibles selon le rôle et le type de conversation
      */
@@ -128,7 +128,6 @@ public class ConversationService {
             throw new IllegalArgumentException("Cannot create conversation with yourself");
         }
 
-        // ✅ Simplification: permettre à tous les utilisateurs authentifiés de créer des conversations
         Optional<Conversation> existing = conversationRepository
                 .findDirectConversationBetweenUsers(userId1, userId2);
 
@@ -137,7 +136,7 @@ public class ConversationService {
             return convertToDTO(existing.get(), userId1);
         }
 
-        // ✅ Récupérer les utilisateurs et créer la conversation
+        // Récupérer les utilisateurs et créer la conversation
         UserResponse user1 = fetchUserById(userId1, token);
         UserResponse user2 = fetchUserById(userId2, token);
 
@@ -159,7 +158,15 @@ public class ConversationService {
         conversation.setParticipants(participants);
 
         log.info("Created new direct conversation: {}", conversation.getId());
-        return convertToDTO(conversation, userId1);
+
+        // ✅ Convertir en DTO
+        ConversationDTO conversationDTO = convertToDTO(conversation, userId1);
+
+        // ✅ NOUVEAU: Diffuser aux deux participants
+        Set<Long> participantIds = Set.of(userId1, userId2);
+        webSocketService.broadcastNewConversation(conversationDTO, participantIds);
+
+        return conversationDTO;
     }
 
     private ConversationParticipant createParticipant(Conversation conversation, Long userId, String userName) {
@@ -462,36 +469,83 @@ public class ConversationService {
 
 
     /**
-     * ✅ CORRIGÉ: Crée ou récupère une conversation de groupe pour une compétence
+     * ✅ Crée ou récupère une conversation skill et
+     *    garantit que TOUS les utilisateurs autorisés (producteur + receivers)
+     *    sont participants et reçoivent la conversation.
      */
     @Transactional
     public ConversationDTO createOrGetSkillConversation(Integer skillId, Long userId, String token) {
-        log.debug("Creating or getting skill conversation for skill {} and user {}", skillId, userId);
+        log.debug("🎯 createOrGetSkillConversation: skill={}, user={}", skillId, userId);
 
-        // ✅ : Permettre à tout utilisateur authentifié de créer une conversation de compétence
-        SkillResponse skill = null;
-        try {
-            skill = fetchSkill(skillId);
-            log.debug("Skill found: {}", skill != null ? skill.name() : "null");
-        } catch (Exception e) {
-            log.warn("Skill {} not found in skill service, creating conversation anyway", skillId);
+        // 1️⃣ Récupérer la liste complète des utilisateurs de la compétence
+        List<UserResponse> allSkillUsers = exchangeServiceClient.getSkillUsersSimple(skillId, token);
+        if (allSkillUsers.isEmpty()) {
+            throw new IllegalStateException("Aucun utilisateur trouvé pour la compétence " + skillId);
         }
 
-        // Chercher conversation existante pour cette compétence
-        Optional<Conversation> existing = conversationRepository
-                .findBySkillIdAndType(skillId, Conversation.ConversationType.SKILL_GROUP);
+        // 2️⃣ Chercher ou créer la conversation
+        Optional<Conversation> existingConv =
+                conversationRepository.findBySkillIdAndType(skillId, Conversation.ConversationType.SKILL_GROUP);
 
-        if (existing.isPresent()) {
-            log.debug("Skill conversation already exists: {}", existing.get().getId());
-            // Ajouter l'utilisateur s'il n'y est pas déjà
-            addUserToSkillConversationIfNeeded(existing.get(), userId, token);
-            return convertToDTO(existing.get(), userId);
+        Conversation conversation;
+        boolean isNew = false;
+
+        if (existingConv.isPresent()) {
+            conversation = existingConv.get();
+            log.debug("Conversation skill existante : {}", conversation.getId());
+        } else {
+            SkillResponse skill = fetchSkill(skillId);
+            String name = (skill != null) ? "Skill: " + skill.name() : "Skill Discussion: " + skillId;
+            conversation = Conversation.builder()
+                    .name(name)
+                    .type(Conversation.ConversationType.SKILL_GROUP)
+                    .skillId(skillId)
+                    .status(Conversation.ConversationStatus.ACTIVE)
+                    .build();
+            conversation = conversationRepository.save(conversation);
+            log.info("✅ Nouvelle conversation skill créée : {}", conversation.getId());
+            isNew = true;
         }
 
-        // ✅ : Créer une nouvelle conversation même si le skill n'existe pas exactement
-        return createNewSkillConversationFixed(skillId, skill, userId, token);
+        // 3️⃣ Ajouter TOUS les utilisateurs autorisés comme participants (idempotant)
+        Set<Long> participantIds = new HashSet<>();
+        for (UserResponse u : allSkillUsers) {
+            addUserToSkillConversationIfNeeded(conversation, u.id(), token);
+            participantIds.add(u.id());
+        }
+
+        // 4️⃣ Convertir en DTO
+        ConversationDTO dto = convertToDTO(conversation, userId);
+
+        // 5️⃣ Diffusion WebSocket à tous les concernés
+        webSocketService.broadcastNewConversation(dto, participantIds);
+
+        return dto;
     }
 
+    /**
+     * ✅ Méthode utilitaire interne pour ajouter un participant s’il n’existe pas encore
+     */
+    public void addUserToSkillConversationIfNeeded(Conversation conversation, Long userId, String token) {
+        boolean alreadyThere = conversation.getParticipants().stream()
+                .anyMatch(p -> p.getUserId().equals(userId) && p.isActive());
+        if (alreadyThere) return;
+
+        UserResponse user = fetchUserById(userId, token);
+        ConversationParticipant participant = ConversationParticipant.builder()
+                .conversation(conversation)
+                .userId(userId)
+                .userName(user.firstName() + " " + user.lastName())
+                .role(userId.equals(conversation.getParticipants().stream()
+                        .filter(p -> p.getRole() == ConversationParticipant.ParticipantRole.ADMIN)
+                        .findFirst()
+                        .map(ConversationParticipant::getUserId)
+                        .orElse(userId))
+                        ? ConversationParticipant.ParticipantRole.ADMIN
+                        : ConversationParticipant.ParticipantRole.MEMBER)
+                .build();
+        participantRepository.save(participant);
+    }
     /**
      * ✅ NOUVEAU: Version corrigée de création de conversation de compétence
      */
@@ -514,18 +568,22 @@ public class ConversationService {
         conversation = conversationRepository.save(conversation);
         log.info("✅ Created new skill conversation: {} for skill {}", conversation.getId(), skillId);
 
-        // ✅ : Ajouter l'utilisateur actuel comme premier participant
+        // ✅ Collecter tous les IDs des participants
+        Set<Long> participantIds = new HashSet<>();
+
+        // Ajouter l'utilisateur actuel comme premier participant
         UserResponse currentUser = fetchUserById(userId, token);
         ConversationParticipant userParticipant = ConversationParticipant.builder()
                 .conversation(conversation)
                 .userId(userId)
                 .userName(currentUser.firstName() + " " + currentUser.lastName())
-                .role(ConversationParticipant.ParticipantRole.ADMIN) // Premier utilisateur = admin
+                .role(ConversationParticipant.ParticipantRole.ADMIN)
                 .build();
 
         participantRepository.save(userParticipant);
+        participantIds.add(userId);
 
-        // ✅ : Ajouter le propriétaire de la compétence s'il est différent
+        // Ajouter le propriétaire de la compétence s'il est différent
         if (skill != null && !userId.equals(skill.userId())) {
             try {
                 UserResponse skillOwner = fetchUserById(skill.userId(), token);
@@ -536,15 +594,21 @@ public class ConversationService {
                         .role(ConversationParticipant.ParticipantRole.MEMBER)
                         .build();
                 participantRepository.save(ownerParticipant);
+                participantIds.add(skill.userId());
                 log.debug("Added skill owner {} to conversation", skill.userId());
             } catch (Exception e) {
                 log.warn("Could not add skill owner to conversation: {}", e.getMessage());
             }
         }
 
-        return convertToDTO(conversation, userId);
-    }
+        // ✅ IMPORTANT: Convertir en DTO avant diffusion
+        ConversationDTO conversationDTO = convertToDTO(conversation, userId);
 
+        // ✅ NOUVEAU: Diffuser la nouvelle conversation via WebSocket
+        webSocketService.broadcastNewConversation(conversationDTO, participantIds);
+
+        return conversationDTO;
+    }
     /**
      * Récupère toutes les conversations d'un utilisateur
      */
@@ -800,23 +864,6 @@ public class ConversationService {
     /**
      * ✅ CORRIGÉ: Ajouter un utilisateur à une conversation de compétence si nécessaire
      */
-    public void addUserToSkillConversationIfNeeded(Conversation conversation, Long userId, String token) {
-        boolean isAlreadyParticipant = conversation.getParticipants().stream()
-                .anyMatch(p -> p.getUserId().equals(userId) && p.isActive());
-
-        if (!isAlreadyParticipant) {
-            UserResponse user = fetchUserById(userId, token);
-            ConversationParticipant participant = ConversationParticipant.builder()
-                    .conversation(conversation)
-                    .userId(userId)
-                    .userName(user.firstName() + " " + user.lastName())
-                    .role(ConversationParticipant.ParticipantRole.MEMBER)
-                    .build();
-
-            participantRepository.save(participant);
-            log.info("✅ Added user {} to skill conversation {}", userId, conversation.getId());
-        }
-    }
 
     // ===== MÉTHODES PRIVÉES =====
 

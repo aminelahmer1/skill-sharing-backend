@@ -2,6 +2,7 @@ package com.example.servicemessagerie.controller;
 
 import com.example.servicemessagerie.dto.*;
 import com.example.servicemessagerie.service.ConversationService;
+import com.example.servicemessagerie.service.ConversationWebSocketService;
 import com.example.servicemessagerie.util.UserIdResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +27,33 @@ public class ConversationController {
 
     private final ConversationService conversationService;
     private final UserIdResolver userIdResolver;
+    private final ConversationWebSocketService webSocketService;
 
+    @PostMapping("/conversations/skill/get-or-create")
+    public ResponseEntity<ConversationDTO> createOrGetSkillConversation(
+            @RequestBody CreateSkillConversationRequest request,
+            @RequestHeader("Authorization") String token,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        try {
+            Long userId = userIdResolver.resolveUserId(jwt, token);
+            log.info("🎓 Creating skill conversation for skill {} by user {}", request.getSkillId(), userId);
+
+            ConversationDTO conversation = conversationService.createOrGetSkillConversation(
+                    request.getSkillId(), userId, token);
+
+            // ✅ NOUVEAU: Diffuser à TOUS les participants potentiels
+            webSocketService.broadcastNewSkillConversation(conversation, request.getSkillId(), token);
+
+            log.info("✅ Skill conversation created/retrieved: {} for skill {}",
+                    conversation.getId(), request.getSkillId());
+            return ResponseEntity.ok(conversation);
+
+        } catch (Exception e) {
+            log.error("❌ Error creating skill conversation: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
     /**
      * ✅ AMÉLIORÉ: Récupère toutes les conversations d'un utilisateur avec logs détaillés
      */
