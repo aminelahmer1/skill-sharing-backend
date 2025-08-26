@@ -45,90 +45,66 @@ public class MessageService {
 
     @Transactional(propagation = Propagation.REQUIRED, isolation = Isolation.READ_COMMITTED)
     public MessageDTO sendMessage(MessageRequest request, String token) {
-        log.debug("Sending message to conversation {}", request.getConversationId());
+        log.debug("📤 sendMessage: conversation={}, sender={}", request.getConversationId(), request.getSenderId());
 
-        try {
-            // ✅ VALIDATION DES PARAMÈTRES
-            if (request.getConversationId() == null) {
-                throw new IllegalArgumentException("Conversation ID is required");
-            }
-            if (request.getSenderId() == null) {
-                throw new IllegalArgumentException("Sender ID is required");
-            }
-            if (request.getContent() == null || request.getContent().trim().isEmpty()) {
-                throw new IllegalArgumentException("Message content cannot be empty");
-            }
-
-            // ✅ RÉCUPÉRER LA CONVERSATION AVEC PARTICIPANTS
-            Conversation conversation = conversationRepository.findById(request.getConversationId())
-                    .orElseThrow(() -> new IllegalArgumentException("Conversation not found: " + request.getConversationId()));
-
-            // ✅ VÉRIFIER LE STATUT DE LA CONVERSATION
-            if (conversation.getStatus() != Conversation.ConversationStatus.ACTIVE) {
-                throw new IllegalArgumentException("Cannot send message to inactive conversation");
-            }
-
-            // ✅ LOGIQUE DE PERMISSION SELON LE TYPE
-            if (conversation.getType() == Conversation.ConversationType.SKILL_GROUP) {
-                // Pour SKILL_GROUP : auto-join si pas participant
-                handleSkillGroupParticipation(conversation, request.getSenderId(), token);
-            } else {
-                // Pour DIRECT/GROUP : vérifier participation stricte
-                boolean isParticipant = participantRepository
-                        .existsByConversationIdAndUserId(conversation.getId(), request.getSenderId());
-
-                if (!isParticipant) {
-                    log.warn("User {} is not a participant of conversation {}",
-                            request.getSenderId(), request.getConversationId());
-                    throw new SecurityException("User is not authorized to send messages to this conversation");
-                }
-            }
-
-            // ✅ RÉCUPÉRER LES INFOS DE L'EXPÉDITEUR
-            UserResponse sender = fetchUserById(request.getSenderId(), token);
-            String senderFullName = (sender.firstName() + " " + sender.lastName()).trim();
-            if (senderFullName.isEmpty()) {
-                senderFullName = sender.username();
-            }
-
-            // ✅ VALIDER ET CRÉER LE MESSAGE
-            Message.MessageType messageType = parseMessageType(request.getType());
-
-            Message message = Message.builder()
-                    .conversation(conversation)
-                    .senderId(request.getSenderId())
-                    .senderName(senderFullName)
-                    .content(request.getContent().trim())
-                    .type(messageType)
-                    .attachmentUrl(request.getAttachmentUrl())
-                    .status(Message.MessageStatus.SENT)
-                    .build();
-
-            // ✅ SAUVEGARDER LE MESSAGE
-            message = messageRepository.save(message);
-            log.info("✅ Message {} created successfully", message.getId());
-
-            // ✅ METTRE À JOUR LA CONVERSATION (transaction séparée)
-            updateConversationLastMessageSafely(conversation.getId(), request.getContent().trim());
-
-            // ✅ CRÉER LE DTO DE RÉPONSE
-            MessageDTO messageDTO = convertToDTO(message, sender);
-
-            // ✅ DIFFUSION ASYNCHRONE (ne pas bloquer la réponse)
-            broadcastMessageAsync(conversation.getId(), messageDTO, conversation.getParticipants(), sender);
-
-            log.info("✅ Message {} sent successfully to conversation {}",
-                    message.getId(), conversation.getId());
-
-            return messageDTO;
-
-        } catch (SecurityException | IllegalArgumentException e) {
-            log.error("❌ Business error sending message: {}", e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            log.error("❌ Unexpected error sending message: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to send message: " + e.getMessage(), e);
+        // 1️⃣ Validation
+        if (request.getConversationId() == null || request.getSenderId() == null ||
+                request.getContent() == null || request.getContent().trim().isEmpty()) {
+            throw new IllegalArgumentException("Paramètres manquants ou invalides");
         }
+
+        // 2️⃣ Conversation & permissions
+        Conversation conversation = conversationRepository.findById(request.getConversationId())
+                .orElseThrow(() -> new IllegalArgumentException("Conversation introuvable"));
+
+        if (conversation.getStatus() != Conversation.ConversationStatus.ACTIVE) {
+            throw new IllegalArgumentException("Conversation inactive");
+        }
+
+        if (conversation.getType() == Conversation.ConversationType.SKILL_GROUP) {
+            handleSkillGroupParticipation(conversation, request.getSenderId(), token);
+        } else {
+            boolean isParticipant = participantRepository
+                    .existsByConversationIdAndUserId(conversation.getId(), request.getSenderId());
+            if (!isParticipant) throw new SecurityException("Non participant");
+        }
+
+        // 3️⃣ Expéditeur
+        UserResponse sender = fetchUserById(request.getSenderId(), token);
+        String senderName = (sender.firstName() + " " + sender.lastName()).trim();
+        if (senderName.isEmpty()) senderName = sender.username();
+
+        // 4️⃣ Créer le message
+        Message message = Message.builder()
+                .conversation(conversation)
+                .senderId(request.getSenderId())
+                .senderName(senderName)
+                .content(request.getContent().trim())
+                .type(parseMessageType(request.getType()))
+                .attachmentUrl(request.getAttachmentUrl())
+                .status(Message.MessageStatus.SENT)
+                .sentAt(LocalDateTime.now())
+                .build();
+
+        message = messageRepository.save(message);
+
+        // 5️⃣ Mettre à jour la conversation
+        updateConversationLastMessageSafely(conversation.getId(), request.getContent().trim());
+
+        // 6️⃣ DTO de réponse
+        MessageDTO dto = convertToDTO(message, sender);
+
+        // 7️⃣ ✅ DIFFUSION WEBSOCKET
+        messagingTemplate.convertAndSend(
+                "/topic/conversation/" + conversation.getId(),
+                dto
+        );
+
+        // 8️⃣ Notifications push asynchrones
+        broadcastMessageAsync(conversation.getId(), dto, conversation.getParticipants(), sender);
+
+        log.info("✅ Message {} envoyé et diffusé", message.getId());
+        return dto;
     }
 
     // ✅ MÉTHODE HELPER : Gérer la participation aux conversations de compétence

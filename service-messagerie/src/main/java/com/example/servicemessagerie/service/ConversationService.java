@@ -475,27 +475,28 @@ public class ConversationService {
      */
     @Transactional
     public ConversationDTO createOrGetSkillConversation(Integer skillId, Long userId, String token) {
-        log.debug("🎯 createOrGetSkillConversation: skill={}, user={}", skillId, userId);
+        log.info("🎯 createOrGetSkillConversation: skill={}, user={}", skillId, userId);
 
-        // 1️⃣ Récupérer la liste complète des utilisateurs de la compétence
+        // 1️⃣ Récupérer tous les utilisateurs de la compétence
         List<UserResponse> allSkillUsers = exchangeServiceClient.getSkillUsersSimple(skillId, token);
         if (allSkillUsers.isEmpty()) {
             throw new IllegalStateException("Aucun utilisateur trouvé pour la compétence " + skillId);
         }
 
         // 2️⃣ Chercher ou créer la conversation
-        Optional<Conversation> existingConv =
-                conversationRepository.findBySkillIdAndType(skillId, Conversation.ConversationType.SKILL_GROUP);
+        Optional<Conversation> existing = conversationRepository
+                .findBySkillIdAndType(skillId, Conversation.ConversationType.SKILL_GROUP);
 
         Conversation conversation;
         boolean isNew = false;
 
-        if (existingConv.isPresent()) {
-            conversation = existingConv.get();
+        if (existing.isPresent()) {
+            conversation = existing.get();
             log.debug("Conversation skill existante : {}", conversation.getId());
         } else {
             SkillResponse skill = fetchSkill(skillId);
             String name = (skill != null) ? "Skill: " + skill.name() : "Skill Discussion: " + skillId;
+
             conversation = Conversation.builder()
                     .name(name)
                     .type(Conversation.ConversationType.SKILL_GROUP)
@@ -503,11 +504,11 @@ public class ConversationService {
                     .status(Conversation.ConversationStatus.ACTIVE)
                     .build();
             conversation = conversationRepository.save(conversation);
-            log.info("✅ Nouvelle conversation skill créée : {}", conversation.getId());
             isNew = true;
+            log.info("✅ Nouvelle conversation skill créée : {}", conversation.getId());
         }
 
-        // 3️⃣ Ajouter TOUS les utilisateurs autorisés comme participants (idempotant)
+        // 3️⃣ Ajouter tous les utilisateurs comme participants (idempotent)
         Set<Long> participantIds = new HashSet<>();
         for (UserResponse u : allSkillUsers) {
             addUserToSkillConversationIfNeeded(conversation, u.id(), token);
@@ -517,12 +518,12 @@ public class ConversationService {
         // 4️⃣ Convertir en DTO
         ConversationDTO dto = convertToDTO(conversation, userId);
 
-        // 5️⃣ Diffusion WebSocket à tous les concernés
+        // 5️⃣ ✅ DIFFUSION WEBSOCKET
         webSocketService.broadcastNewConversation(dto, participantIds);
 
+        log.info("✅ Conversation skill {} diffusée à {} utilisateurs", conversation.getId(), participantIds.size());
         return dto;
     }
-
     /**
      * ✅ Méthode utilitaire interne pour ajouter un participant s’il n’existe pas encore
      */
