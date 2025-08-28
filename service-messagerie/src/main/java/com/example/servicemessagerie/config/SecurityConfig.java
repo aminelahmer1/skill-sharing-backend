@@ -50,6 +50,7 @@ public class SecurityConfig {
 
                         // ✅ Uploads publics
                         .requestMatchers("/message-uploads/**").permitAll()
+                        .requestMatchers("/uploads/**").permitAll()
 
                         // ✅ API endpoints nécessitent authentification
                         .requestMatchers("/api/v1/messages/**").authenticated()
