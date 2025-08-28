@@ -4,6 +4,7 @@ import com.example.servicemessagerie.entity.Message;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -29,26 +30,38 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      * Trouve les messages non lus pour un utilisateur dans une conversation
      */
     @Query("SELECT m FROM Message m WHERE m.conversation.id = :conversationId " +
-            "AND m.senderId != :userId AND m.status != 'READ' " +
-            "AND m.isDeleted = false ORDER BY m.sentAt ASC")
+            "AND m.senderId != :userId " +
+            "AND (m.status = 'SENT' OR m.status = 'DELIVERED') " +
+            "AND m.isDeleted = false " +
+            "ORDER BY m.sentAt ASC")
     List<Message> findUnreadMessagesForUser(@Param("conversationId") Long conversationId,
                                             @Param("userId") Long userId);
-
+    @Modifying
+    @Query("UPDATE Message m SET m.status = 'SENT', m.readAt = null " +
+            "WHERE m.conversation.id = :conversationId " +
+            "AND m.senderId != :userId")
+    void resetReadStatus(@Param("conversationId") Long conversationId,
+                         @Param("userId") Long userId);
     /**
      * Compte les messages non lus pour un utilisateur (toutes conversations)
      */
     @Query("SELECT COUNT(m) FROM Message m " +
-            "JOIN m.conversation.participants p " +
-            "WHERE p.userId = :userId AND p.isActive = true " +
+            "JOIN m.conversation c " +
+            "JOIN c.participants p " +
+            "WHERE p.userId = :userId " +
+            "AND p.isActive = true " +
             "AND m.senderId != :userId " +
-            "AND m.status != 'read' AND m.isDeleted = false")
+            "AND m.status != 'READ' " +
+            "AND m.isDeleted = false")
     int countUnreadMessagesForUser(@Param("userId") Long userId);
 
     /**
      * Compte les messages non lus dans une conversation spécifique
      */
     @Query("SELECT COUNT(m) FROM Message m WHERE m.conversation.id = :conversationId " +
-            "AND m.senderId != :userId AND m.status != 'read' AND m.isDeleted = false")
+            "AND m.senderId != :userId " +
+            "AND m.status != 'READ' " +
+            "AND m.isDeleted = false")
     int countUnreadInConversation(@Param("conversationId") Long conversationId,
                                   @Param("userId") Long userId);
 
@@ -56,10 +69,13 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      * Compte les messages non lus par conversation pour un utilisateur
      */
     @Query("SELECT m.conversation.id, COUNT(m) FROM Message m " +
-            "JOIN m.conversation.participants p " +
-            "WHERE p.userId = :userId AND p.isActive = true " +
+            "JOIN m.conversation c " +
+            "JOIN c.participants p " +
+            "WHERE p.userId = :userId " +
+            "AND p.isActive = true " +
             "AND m.senderId != :userId " +
-            "AND m.status != 'read' AND m.isDeleted = false " +
+            "AND m.status != 'READ' " +
+            "AND m.isDeleted = false " +
             "GROUP BY m.conversation.id")
     List<Object[]> countUnreadMessagesPerConversation(@Param("userId") Long userId);
 
@@ -77,6 +93,12 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
             "ORDER BY m.sentAt DESC")
     List<Message> findByConversationIdAndSenderId(@Param("conversationId") Long conversationId,
                                                   @Param("userId") Long userId);
+    @Query("SELECT m FROM Message m WHERE m.conversation.id = :conversationId " +
+            "AND m.id > :afterMessageId " +
+            "AND m.isDeleted = false " +
+            "ORDER BY m.sentAt ASC")
+    List<Message> findMessagesAfter(@Param("conversationId") Long conversationId,
+                                    @Param("afterMessageId") Long afterMessageId);
 
     /**
      * Trouve les messages récents d'une conversation (dernières 24h)
@@ -178,10 +200,24 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     /**
      * Marque tous les messages d'une conversation comme lus pour un utilisateur
      */
+    @Modifying
     @Query("UPDATE Message m SET m.status = 'READ', m.readAt = :readTime " +
             "WHERE m.conversation.id = :conversationId " +
-            "AND m.senderId != :userId AND m.status != 'read'")
+            "AND m.senderId != :userId " +
+            "AND m.status != 'READ' " +
+            "AND m.isDeleted = false")
     int markAllAsRead(@Param("conversationId") Long conversationId,
                       @Param("userId") Long userId,
                       @Param("readTime") LocalDateTime readTime);
+
+
+
+
+
+
+
+
+
+
+
 }

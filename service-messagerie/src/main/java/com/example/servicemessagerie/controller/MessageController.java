@@ -16,6 +16,9 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.HashMap;
+import java.util.Map;
+
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/messages")
@@ -40,47 +43,24 @@ public class MessageController {
             request.setSenderId(userId);
 
             log.info("📤 Sending message from user {} to conversation {}", userId, request.getConversationId());
-            log.debug("Message content: '{}', type: {}", request.getContent(), request.getType());
-
-            // ✅ : Vérifier que l'utilisateur peut envoyer
-            Conversation conversation = conversationService.getConversationEntity(request.getConversationId());
-            if (conversation == null) {
-                log.error("❌ Conversation {} not found", request.getConversationId());
-                return ResponseEntity.notFound().build();
-            }
-
-            boolean canSend = conversationService.canUserSendMessage(conversation, userId);
-            log.info("Can user {} send to conversation {}? {}", userId, request.getConversationId(), canSend);
-
-            if (!canSend) {
-                // ✅ : Pour les conversations de compétence, ajouter automatiquement l'utilisateur
-                if (conversation.getType() == Conversation.ConversationType.SKILL_GROUP) {
-                    log.info("🔄 Auto-adding user {} to skill conversation {}", userId, conversation.getId());
-                    try {
-                        conversationService.addUserToSkillConversationIfNeeded(conversation, userId, token);
-                        log.info("✅ User {} successfully added to skill conversation", userId);
-                    } catch (Exception e) {
-                        log.error("❌ Failed to add user {} to skill conversation: {}", userId, e.getMessage());
-                        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-                    }
-                } else {
-                    log.error("❌ User {} not authorized to send to conversation {}", userId, request.getConversationId());
-                    return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-                }
-            }
 
             MessageDTO message = messageService.sendMessage(request, token);
+
             log.info("✅ Message sent successfully: {}", message.getId());
             return ResponseEntity.ok(message);
 
         } catch (IllegalArgumentException e) {
             log.error("❌ Bad request: {}", e.getMessage());
             return ResponseEntity.badRequest().build();
+        } catch (SecurityException e) {
+            log.error("❌ Security error: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         } catch (Exception e) {
             log.error("❌ Error sending message: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
+
 
     /**
      * Récupère les messages d'une conversation
@@ -118,7 +98,7 @@ public class MessageController {
      * Marque les messages comme lus
      */
     @PostMapping("/conversation/{conversationId}/read")
-    public ResponseEntity<Void> markAsRead(
+    public ResponseEntity<Map<String, Object>> markAsRead(
             @PathVariable Long conversationId,
             @RequestHeader("Authorization") String token,
             @AuthenticationPrincipal Jwt jwt) {
@@ -127,17 +107,33 @@ public class MessageController {
             Long userId = userIdResolver.resolveUserId(jwt, token);
             log.info("👁️ Marking messages as read for conversation {} by user {}", conversationId, userId);
 
+            // Marquer tous les messages comme lus
             messageService.markMessagesAsRead(conversationId, userId);
 
-            log.info("✅ Messages marked as read for conversation {}", conversationId);
-            return ResponseEntity.ok().build();
+            // Récupérer le nouveau compteur de non-lus
+            int newUnreadCount = messageService.getUnreadCountForConversation(conversationId, userId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("conversationId", conversationId);
+            response.put("newUnreadCount", newUnreadCount);
+            response.put("message", "Messages marked as read");
+
+            log.info("✅ Messages marked as read successfully for conversation {}", conversationId);
+            return ResponseEntity.ok(response);
 
         } catch (SecurityException e) {
             log.warn("🚫 User access denied to conversation {}", conversationId);
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                    "success", false,
+                    "error", "Access denied"
+            ));
         } catch (Exception e) {
-            log.error("❌ Error marking messages as read for conversation {}: {}", conversationId, e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            log.error("❌ Error marking messages as read: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "error", "Failed to mark messages as read"
+            ));
         }
     }
 
@@ -271,4 +267,55 @@ public class MessageController {
         public String getContent() { return content; }
         public void setContent(String content) { this.content = content; }
     }
+    @GetMapping("/conversation/{conversationId}/unread-count")
+    public ResponseEntity<Map<String, Object>> getUnreadCount(
+            @PathVariable Long conversationId,
+            @RequestHeader("Authorization") String token,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        try {
+            Long userId = userIdResolver.resolveUserId(jwt, token);
+            log.debug("📊 Getting unread count for conversation {} and user {}", conversationId, userId);
+
+            int unreadCount = messageService.getUnreadCountForConversation(conversationId, userId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("conversationId", conversationId);
+            response.put("unreadCount", unreadCount);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("❌ Error getting unread count: {}", e.getMessage());
+            return ResponseEntity.ok(Map.of(
+                    "conversationId", conversationId,
+                    "unreadCount", 0
+            ));
+        }
+
+    }
+    @GetMapping("/total-unread-count")
+    public ResponseEntity<Map<String, Object>> getTotalUnreadCount(
+            @RequestHeader("Authorization") String token,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        try {
+            Long userId = userIdResolver.resolveUserId(jwt, token);
+            log.debug("📊 Getting total unread count for user {}", userId);
+
+            int totalUnread = messageService.getTotalUnreadCount(userId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("totalUnread", totalUnread);
+            response.put("userId", userId);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("❌ Error getting total unread count: {}", e.getMessage());
+            return ResponseEntity.ok(Map.of("totalUnread", 0));
+        }
+    }
+
+
 }

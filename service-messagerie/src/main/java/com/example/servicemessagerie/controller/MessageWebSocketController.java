@@ -45,6 +45,12 @@ public class MessageWebSocketController {
                 message
         );
 
+        // Pour tous les participants actifs, marquer comme lu automatiquement
+        messagingTemplate.convertAndSend(
+                "/topic/conversation/" + conversationId + "/auto-read",
+                Map.of("messageId", message.getId(), "senderId", message.getSenderId())
+        );
+
         log.debug("Message sent to conversation {} by user {}", conversationId, userId);
     }
 
@@ -60,10 +66,52 @@ public class MessageWebSocketController {
             throw new SecurityException("Authentication required");
         }
 
+        Long userId = Long.parseLong(auth.getToken().getSubject());
+
+        // Si l'utilisateur tape, marquer les messages comme lus
+        if (indicator.isTyping()) {
+            try {
+                // Cette méthode doit être ajoutée dans MessageService
+                messageService.markMessagesAsRead(conversationId, userId);
+                log.debug("Auto-marked messages as read for typing user {} in conversation {}",
+                        userId, conversationId);
+            } catch (Exception e) {
+                log.error("Error auto-marking as read on typing: {}", e.getMessage());
+            }
+        }
+
         log.debug("Typing indicator for conversation {} from user {}",
                 conversationId, indicator.getUserId());
 
         return indicator;
+    }
+
+    @MessageMapping("/conversation/{conversationId}/active")
+    public void setConversationActive(
+            @DestinationVariable Long conversationId,
+            @Payload Map<String, Object> payload,
+            SimpMessageHeaderAccessor headerAccessor) {
+
+        JwtAuthenticationToken auth = (JwtAuthenticationToken) headerAccessor.getUser();
+        if (auth == null) {
+            throw new SecurityException("Authentication required");
+        }
+
+        Long userId = Long.parseLong(auth.getToken().getSubject());
+        boolean isActive = (boolean) payload.getOrDefault("active", false);
+
+        // Notifier que la conversation est active/inactive
+        log.debug("Conversation {} marked as {} for user {}",
+                conversationId, isActive ? "active" : "inactive", userId);
+
+        // Si active, marquer tous les messages comme lus
+        if (isActive) {
+            try {
+                messageService.markMessagesAsRead(conversationId, userId);
+            } catch (Exception e) {
+                log.error("Error marking messages as read on activation: {}", e.getMessage());
+            }
+        }
     }
 
     @MessageMapping("/presence")

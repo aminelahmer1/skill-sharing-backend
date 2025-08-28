@@ -27,41 +27,52 @@ public class ConversationParticipant {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY) // ✅ OBLIGATOIRE - LAZY pour éviter N+1
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "conversation_id", nullable = false)
     private Conversation conversation;
 
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "user_name", length = 255)
+    @Column(name = "user_name")
     private String userName;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "role", nullable = false)
+    @Column(nullable = false)
     @Builder.Default
     private ParticipantRole role = ParticipantRole.MEMBER;
 
-    @CreationTimestamp
-    @Column(name = "joined_at", nullable = false)
-    private LocalDateTime joinedAt;
+    @Column(name = "is_active")
+    @Builder.Default
+    private boolean isActive = true;
 
-    @Column(name = "last_read_message_id")
-    private Long lastReadMessageId;
-
-    @Column(name = "notification_enabled", nullable = false)
+    @Column(name = "notification_enabled")
     @Builder.Default
     private boolean notificationEnabled = true;
 
-    // ✅ CORRECTION CRITIQUE - Champ is_active avec contraintes
-    @Column(name = "is_active", nullable = false)
+    // ✅ NOUVEAU: Champs pour gérer l'état de lecture
+    @Column(name = "last_read_message_id")
+    private Long lastReadMessageId;
+
+    @Column(name = "last_read_time")
+    private LocalDateTime lastReadTime;
+
+    @Column(name = "unread_count")
     @Builder.Default
-    private boolean isActive = true;
+    private Integer unreadCount = 0;
+
+    @Column(name = "joined_at")
+    @Builder.Default
+    private LocalDateTime joinedAt = LocalDateTime.now();
 
     @Column(name = "left_at")
     private LocalDateTime leftAt;
 
-    // ✅ ENUM
+    @Column(name = "added_by")
+    private Long addedBy;
+
+
+
     public enum ParticipantRole {
         ADMIN("Administrateur"),
         MEMBER("Membre"),
