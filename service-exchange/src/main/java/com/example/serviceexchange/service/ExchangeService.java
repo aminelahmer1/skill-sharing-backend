@@ -1583,4 +1583,133 @@ public class ExchangeService {
                 })
                 .collect(Collectors.toList());
     }
+
+
+    @Transactional
+    public void deleteAllExchangesBySkillId(Integer skillId, Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse user = getAuthenticatedUser(jwt);
+
+        // Vérifier que le skill existe et appartient à l'utilisateur
+        SkillResponse skill = fetchSkill(skillId);
+        if (skill != null && !user.id().equals(skill.userId())) {
+            throw new AccessDeniedException("You can only delete exchanges for your own skills");
+        }
+
+        // Récupérer tous les exchanges pour ce skill
+        List<Exchange> exchanges = exchangeRepository.findBySkillId(skillId);
+
+        if (exchanges.isEmpty()) {
+            log.info("No exchanges found for skill ID: {}", skillId);
+            return;
+        }
+
+        log.info("Deleting {} exchanges for skill ID: {}", exchanges.size(), skillId);
+
+        // Notifier les utilisateurs concernés avant la suppression
+        for (Exchange exchange : exchanges) {
+            try {
+                UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
+                UserResponse producer = fetchUserById(exchange.getProducerId(), token);
+
+                // Envoyer une notification de suppression
+            } catch (Exception e) {
+                log.error("Failed to send notification for exchange ID: {}", exchange.getId(), e);
+                // Continuer même si la notification échoue
+            }
+        }
+
+        // Supprimer tous les exchanges
+        exchangeRepository.deleteAll(exchanges);
+        log.info("Successfully deleted {} exchanges for skill ID: {}", exchanges.size(), skillId);
+    }
+
+    /**
+     * Vérifie s'il existe des exchanges pour un skill
+     */
+    @Transactional(readOnly = true)
+    public boolean hasExchangesForSkill(Integer skillId) {
+        List<Exchange> exchanges = exchangeRepository.findBySkillId(skillId);
+        return !exchanges.isEmpty();
+    }
+
+    /**
+     * Nettoie les exchanges orphelins (dont le skill n'existe plus)
+     * Cette méthode peut être appelée au démarrage ou périodiquement
+     */
+    @Transactional
+    public Map<String, Object> cleanupOrphanedExchanges(Jwt jwt) {
+        log.info("Starting cleanup of orphaned exchanges");
+
+        List<Exchange> allExchanges = exchangeRepository.findAll();
+        List<Exchange> orphanedExchanges = new ArrayList<>();
+        Set<Integer> checkedSkills = new HashSet<>();
+        Set<Integer> invalidSkillIds = new HashSet<>();
+
+        for (Exchange exchange : allExchanges) {
+            Integer skillId = exchange.getSkillId();
+
+            // Éviter de vérifier le même skill plusieurs fois
+            if (!checkedSkills.contains(skillId)) {
+                SkillResponse skill = fetchSkill(skillId);
+                checkedSkills.add(skillId);
+
+                if (skill == null) {
+                    invalidSkillIds.add(skillId);
+                    log.warn("Skill not found for ID: {} - marking exchanges as orphaned", skillId);
+                }
+            }
+
+            if (invalidSkillIds.contains(skillId)) {
+                orphanedExchanges.add(exchange);
+            }
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("totalExchanges", allExchanges.size());
+        result.put("orphanedExchanges", orphanedExchanges.size());
+        result.put("invalidSkillIds", invalidSkillIds);
+
+        if (!orphanedExchanges.isEmpty()) {
+            log.info("Found {} orphaned exchanges for {} non-existent skills",
+                    orphanedExchanges.size(), invalidSkillIds.size());
+
+            // Supprimer les exchanges orphelins
+            exchangeRepository.deleteAll(orphanedExchanges);
+            log.info("Deleted {} orphaned exchanges", orphanedExchanges.size());
+
+            result.put("status", "CLEANED");
+            result.put("deletedCount", orphanedExchanges.size());
+        } else {
+            log.info("No orphaned exchanges found");
+            result.put("status", "NO_ORPHANS_FOUND");
+            result.put("deletedCount", 0);
+        }
+
+        return result;
+    }
+
+    /**
+     * Méthode pour vérifier et nettoyer un exchange spécifique
+     */
+    @Transactional
+    public boolean validateAndCleanExchange(Integer exchangeId) {
+        Optional<Exchange> exchangeOpt = exchangeRepository.findById(exchangeId);
+
+        if (exchangeOpt.isEmpty()) {
+            return true; // Déjà supprimé
+        }
+
+        Exchange exchange = exchangeOpt.get();
+        SkillResponse skill = fetchSkill(exchange.getSkillId());
+
+        if (skill == null) {
+            log.warn("Deleting orphaned exchange ID: {} for non-existent skill ID: {}",
+                    exchangeId, exchange.getSkillId());
+            exchangeRepository.delete(exchange);
+            return false; // Exchange était orphelin
+        }
+
+        return true; // Exchange valide
+    }
 }

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -257,5 +258,38 @@ public class ExchangeController {
     public ResponseEntity<UserSkillsWithUsersResponse> getProducerSkillsWithUsers(
             @AuthenticationPrincipal Jwt jwt) {
         return ResponseEntity.ok(exchangeService.getAllUserSkillsWithUsers(jwt));
+    }
+
+    @DeleteMapping("/skill/{skillId}/cleanup")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<Void> deleteExchangesBySkillId(
+            @PathVariable Integer skillId,
+            @AuthenticationPrincipal Jwt jwt) {
+        exchangeService.deleteAllExchangesBySkillId(skillId, jwt);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Vérifie s'il existe des exchanges pour un skill donné
+     */
+    @GetMapping("/skill/{skillId}/exists")
+    @PreAuthorize("hasAnyRole('PRODUCER', 'RECEIVER')")
+    public ResponseEntity<Boolean> hasExchangesForSkill(
+            @PathVariable Integer skillId,
+            @AuthenticationPrincipal Jwt jwt) {
+        boolean exists = exchangeService.hasExchangesForSkill(skillId);
+        return ResponseEntity.ok(exists);
+    }
+
+    /**
+     * Endpoint admin pour nettoyer les exchanges orphelins au démarrage
+     * Peut être appelé manuellement ou automatiquement au startup
+     */
+    @PostMapping("/admin/cleanup-orphaned")
+    @PreAuthorize("hasRole('ADMIN')") // Ou utiliser un token système
+    public ResponseEntity<Map<String, Object>> cleanupOrphanedExchanges(
+            @AuthenticationPrincipal Jwt jwt) {
+        Map<String, Object> result = exchangeService.cleanupOrphanedExchanges(jwt);
+        return ResponseEntity.ok(result);
     }
 }

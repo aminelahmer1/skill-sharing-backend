@@ -1,5 +1,6 @@
 package com.example.serviceskill.service;
 
+import com.example.serviceskill.controller.ExchangeServiceClient;
 import com.example.serviceskill.controller.UserServiceClient;
 import com.example.serviceskill.dto.SkillRequest;
 import com.example.serviceskill.dto.SkillResponse;
@@ -35,7 +36,7 @@ public class SkillService {
     private final SkillMapper skillMapper;
     private final UserServiceClient userServiceClient;
  private  final  FileStorageService fileStorageService;
-
+    private final ExchangeServiceClient exchangeServiceClient;
     public long countSkillsByProducerId(Long producerId, Jwt jwt) {
         // 1. Récupérer l'utilisateur demandeur pour s'assurer qu'il est authentifié
         UserResponse requestingUser = getAuthenticatedUser(jwt);
@@ -165,10 +166,8 @@ public class SkillService {
     public void deleteSkill(Integer id, Jwt jwt) {
         // 1. Récupérer l'utilisateur via son keycloakId
         String keycloakId = jwt.getSubject();
-        UserResponse user = userServiceClient.getUserByKeycloakId(
-                keycloakId,
-                "Bearer " + jwt.getTokenValue()
-        );
+        String token = "Bearer " + jwt.getTokenValue();
+        UserResponse user = userServiceClient.getUserByKeycloakId(keycloakId, token);
 
         if (user == null) {
             throw new UserNotFoundException("User not found for Keycloak ID: " + keycloakId);
@@ -187,11 +186,21 @@ public class SkillService {
             throw new AccessDeniedException("You can only delete your own skills");
         }
 
-        // 4. Supprimer la compétence
+        // 4. NOUVEAU: Supprimer tous les exchanges liés à ce skill
+        try {
+            log.info("Deleting all exchanges for skill ID: {} before skill deletion", id);
+            exchangeServiceClient.deleteExchangesBySkillId(id, token);
+            log.info("Successfully deleted all exchanges for skill ID: {}", id);
+        } catch (Exception e) {
+            log.error("Failed to delete exchanges for skill ID: {}. Error: {}", id, e.getMessage());
+            // On peut décider de continuer ou d'arrêter selon le besoin
+            throw new RuntimeException("Cannot delete skill: Failed to clean up related exchanges", e);
+        }
+
+        // 5. Supprimer la compétence
         skillRepository.delete(skill);
         log.info("Skill deleted by user ID: {} (Keycloak ID: {})", user.id(), keycloakId);
     }
-
     @Transactional
     public void registerForSkill(Integer skillId, Jwt jwt) {
         List<String> roles = jwt.getClaimAsStringList("roles");

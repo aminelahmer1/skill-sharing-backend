@@ -76,3 +76,10 @@ logging:
     com.example.serviceexchange: DEBUG
   file:
     name: logs/service-exchange.log
+
+cleanup:
+  enabled: true  # Activer/désactiver le nettoyage au démarrage
+  on-startup: true
+  scheduled:
+    enabled: false  # Pour activer un nettoyage périodique si nécessaire
+    cron: "0 0 2 * * ?"  # Tous les jours à 2h du matin
