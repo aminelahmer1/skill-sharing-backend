@@ -2,17 +2,14 @@ package com.example.servicelivestream.service;
 
 import com.example.servicelivestream.dto.RecordingRequest;
 import com.example.servicelivestream.dto.RecordingResponse;
-import com.example.servicelivestream.dto.UserResponse;
 import com.example.servicelivestream.entity.LivestreamSession;
 import com.example.servicelivestream.entity.Recording;
-import com.example.servicelivestream.feignclient.UserServiceClient;
+import com.example.servicelivestream.feignclient.SkillServiceClient;
 import com.example.servicelivestream.repository.LivestreamSessionRepository;
 import com.example.servicelivestream.repository.RecordingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cache.annotation.Cacheable;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -22,8 +19,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.*;
@@ -36,329 +35,269 @@ public class RecordingService {
     private final LivestreamSessionRepository sessionRepository;
     private final RecordingRepository recordingRepository;
     private final LiveKitService liveKitService;
-    private final UserServiceClient userServiceClient;
+    private final SkillServiceClient skillServiceClient;
 
     @Value("${application.recording.directory:./recordings}")
     private String recordingDirectory;
-
-    @Value("${application.recording.max-size:1GB}")
-    private String maxRecordingSize;
 
     @Value("${application.recording.retention-days:30}")
     private int retentionDays;
 
     @Transactional
-    public RecordingResponse startRecording(Long sessionId, RecordingRequest request, Jwt jwt) {
+    public RecordingResponse startRecording(Long sessionId, RecordingRequest request, String token) {
         log.info("Starting recording for session: {}", sessionId);
 
-        LivestreamSession session = validateSessionForRecording(sessionId, jwt);
+        LivestreamSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Session not found"));
 
-        // Vérifier qu'il n'y a pas déjà un enregistrement en cours
-        if (session.getRecordingPath() != null) {
-            // Vérifier si l'enregistrement est toujours actif
-            Recording existingRecording = recordingRepository.findBySession(session).orElse(null);
-            if (existingRecording == null) {
-                // L'enregistrement précédent a peut-être échoué, on peut réessayer
-                log.warn("Previous recording path exists but no recording entity found. Proceeding with new recording.");
-            } else {
-                throw new ResponseStatusException(CONFLICT, "Recording already exists for this session");
-            }
+        // Vérifier si un enregistrement est déjà en cours
+        boolean hasActiveRecording = recordingRepository.findBySessionIdAndStatus(sessionId, "RECORDING")
+                .isPresent();
+
+        if (hasActiveRecording) {
+            throw new ResponseStatusException(CONFLICT, "Un enregistrement est déjà en cours pour cette session");
         }
 
-        String recordingId = UUID.randomUUID().toString();
-        String fileName = generateFileName(sessionId, recordingId, request.format());
-        Path recordingPath = Paths.get(recordingDirectory, fileName);
+        // Récupérer le nom de la compétence
+        String skillName = getSkillName(session.getSkillId(), token);
+
+        // Compter les enregistrements existants pour cette session
+        long recordingCount = recordingRepository.countBySessionId(sessionId);
+
+        // Générer le nom du fichier avec le nom de la compétence et le numéro
+        String fileName = generateRecordingFileName(skillName, recordingCount + 1, request.format());
+
+        // Créer le chemin complet avec sous-dossier par session
+        Path sessionDir = Paths.get(recordingDirectory, "session_" + sessionId);
+        Path recordingPath = sessionDir.resolve(fileName);
 
         try {
-            // Créer le répertoire s'il n'existe pas
-            Files.createDirectories(Paths.get(recordingDirectory));
+            // Créer les répertoires nécessaires
+            Files.createDirectories(sessionDir);
+            log.info("Created directory: {}", sessionDir);
 
-            // Vérifier l'espace disque disponible
-            checkDiskSpace(recordingPath);
+            // Vérifier l'espace disque
+            checkDiskSpace(sessionDir);
 
-            // Appeler l'API LiveKit pour démarrer l'enregistrement
+            // Créer l'entité Recording avec statut temporaire
+            Recording recording = Recording.builder()
+                    .session(session)
+                    .filePath(recordingPath.toString())
+                    .fileName(fileName)
+                    .skillName(skillName)
+                    .recordingNumber((int) (recordingCount + 1))
+                    .status("RECORDING")
+                    .startedAt(LocalDateTime.now())
+                    .authorizedUsers(getAllAuthorizedUsers(session))
+                    .build();
+
+            Recording savedRecording = recordingRepository.save(recording);
+
+            // Démarrer l'enregistrement LiveKit
             liveKitService.startRoomRecording(session.getRoomName(), recordingPath.toString());
 
-            // Mettre à jour la session avec le chemin d'enregistrement
-            session.setRecordingPath(recordingPath.toString());
-            sessionRepository.save(session);
+            log.info("Recording started: {} at path {}", fileName, recordingPath);
 
-            log.info("Recording started successfully for session {} at path {}", sessionId, recordingPath);
-
-            return new RecordingResponse(
-                    recordingId,
-                    sessionId,
-                    "RECORDING",
-                    LocalDateTime.now(),
-                    null,
-                    null
-            );
+            return RecordingResponse.builder()
+                    .recordingId(savedRecording.getId().toString())
+                    .sessionId(sessionId)
+                    .fileName(fileName)
+                    .skillName(skillName)
+                    .recordingNumber((int) (recordingCount + 1))
+                    .status("RECORDING")
+                    .startTime(savedRecording.getStartedAt())
+                    .build();
 
         } catch (IOException e) {
             log.error("Failed to create recording directory", e);
-            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Failed to start recording: " + e.getMessage());
-        } catch (Exception e) {
-            log.error("Unexpected error starting recording", e);
-            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Failed to start recording: " + e.getMessage());
+            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Échec de création du répertoire");
         }
     }
 
     @Transactional
-    public void stopRecording(Long sessionId, Jwt jwt) {
+    public void stopRecording(Long sessionId, String token) {
         log.info("Stopping recording for session: {}", sessionId);
 
-        LivestreamSession session = validateSessionForRecording(sessionId, jwt);
+        LivestreamSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Session not found"));
 
-        if (session.getRecordingPath() == null) {
-            throw new ResponseStatusException(BAD_REQUEST, "No recording in progress for this session");
-        }
+        // Récupérer l'enregistrement en cours
+        Recording recording = recordingRepository.findBySessionIdAndStatus(sessionId, "RECORDING")
+                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "Aucun enregistrement en cours"));
 
         try {
-            // Vérifier si un enregistrement existe déjà
-            Recording existingRecording = recordingRepository.findBySession(session).orElse(null);
-            if (existingRecording != null) {
-                log.warn("Recording already stopped for session {}", sessionId);
-                return;
-            }
-
-            // Appeler l'API LiveKit pour arrêter l'enregistrement
+            // Arrêter l'enregistrement LiveKit
             liveKitService.stopRoomRecording(session.getRoomName());
 
-            // Créer l'entité Recording
-            Recording recording = Recording.builder()
-                    .session(session)
-                    .filePath(session.getRecordingPath())
-                    .createdAt(LocalDateTime.now())
-                    .authorizedUsers(getAllAuthorizedUsers(session))
-                    .build();
+            // Attendre un peu pour que le fichier soit écrit
+            Thread.sleep(500);
+
+            // Mettre à jour le statut et les métadonnées
+            recording.setStatus("COMPLETED");
+            recording.setEndedAt(LocalDateTime.now());
+            recording.setDuration(calculateDuration(recording.getStartedAt(), recording.getEndedAt()));
+
+            // Vérifier que le fichier existe et obtenir sa taille
+            Path filePath = Paths.get(recording.getFilePath());
+            if (Files.exists(filePath)) {
+                long fileSize = Files.size(filePath);
+                recording.setFileSize(fileSize);
+                log.info("Recording file size: {} bytes", fileSize);
+            } else {
+                log.warn("Recording file not found immediately at: {}", filePath);
+                // Attendre encore un peu
+                Thread.sleep(1000);
+                if (Files.exists(filePath)) {
+                    recording.setFileSize(Files.size(filePath));
+                }
+            }
 
             recordingRepository.save(recording);
 
-            // Vérifier que le fichier existe
-            Path recordingPath = Paths.get(session.getRecordingPath());
-            if (!Files.exists(recordingPath)) {
-                log.warn("Recording file not found at path: {}", recordingPath);
-            } else {
-                long fileSize = Files.size(recordingPath);
-                log.info("Recording stopped for session {}. File size: {} bytes", sessionId, fileSize);
-            }
+            log.info("Recording stopped successfully: {}", recording.getFileName());
 
-        } catch (IOException e) {
-            log.error("Error checking recording file", e);
         } catch (Exception e) {
-            log.error("Failed to stop recording", e);
-            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Failed to stop recording: " + e.getMessage());
+            log.error("Error handling recording file", e);
+            // Sauvegarder quand même l'enregistrement avec le statut COMPLETED
+            recording.setStatus("COMPLETED");
+            recording.setEndedAt(LocalDateTime.now());
+            recording.setDuration(calculateDuration(recording.getStartedAt(), recording.getEndedAt()));
+            recordingRepository.save(recording);
         }
     }
 
     @Transactional(readOnly = true)
-    public RecordingResponse getRecordingStatus(Long sessionId, Jwt jwt) {
-        LivestreamSession session = getSessionWithAuth(sessionId, jwt);
-
-        if (session.getRecordingPath() == null) {
-            return new RecordingResponse(
-                    null,
-                    sessionId,
-                    "NOT_RECORDING",
-                    null,
-                    null,
-                    null
-            );
-        }
-
-        // Vérifier si un enregistrement existe
-        Recording recording = recordingRepository.findBySession(session).orElse(null);
-
-        if (recording != null) {
-            // L'enregistrement est terminé
-            return new RecordingResponse(
-                    recording.getId().toString(),
-                    sessionId,
-                    "COMPLETED",
-                    recording.getCreatedAt(),
-                    recording.getCreatedAt(),
-                    "/api/v1/livestream/recordings/" + sessionId
-            );
-        }
-
-        // L'enregistrement est en cours
-        return new RecordingResponse(
-                UUID.randomUUID().toString(),
-                sessionId,
-                "RECORDING",
-                session.getStartTime() != null ? session.getStartTime() : LocalDateTime.now(),
-                null,
-                null
-        );
-    }
-
-    @Transactional(readOnly = true)
-    @Cacheable(value = "userRecordings", key = "#jwt.subject")
-    public List<RecordingResponse> getUserRecordings(Jwt jwt) {
-        String token = "Bearer " + jwt.getTokenValue();
-        UserResponse currentUser = userServiceClient.getUserByKeycloakId(jwt.getSubject(), token);
-
-        List<Recording> recordings = recordingRepository.findByAuthorizedUsersContaining(currentUser.id());
+    public List<RecordingResponse> getSessionRecordings(Long sessionId, String token) {
+        List<Recording> recordings = recordingRepository.findBySessionIdOrderByRecordingNumberAsc(sessionId);
 
         return recordings.stream()
-                .map(this::mapToRecordingResponse)
+                .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public Recording getRecordingById(Long recordingId, Jwt jwt) {
+    public List<RecordingResponse> getUserRecordings(Long userId, String token) {
+        // Récupérer tous les enregistrements où l'utilisateur est autorisé
+        List<Recording> recordings = recordingRepository.findByAuthorizedUsersContaining(userId);
+
+        log.info("Found {} recordings for user {}", recordings.size(), userId);
+
+        return recordings.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public RecordingResponse getRecordingById(Long recordingId, String token) {
         Recording recording = recordingRepository.findById(recordingId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Recording not found"));
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Enregistrement non trouvé"));
 
-        // Vérifier l'autorisation
-        String token = "Bearer " + jwt.getTokenValue();
-        UserResponse currentUser = userServiceClient.getUserByKeycloakId(jwt.getSubject(), token);
+        return mapToResponse(recording);
+    }
 
-        if (!recording.getAuthorizedUsers().contains(currentUser.id()) &&
-                !recording.getSession().getProducerId().equals(currentUser.id())) {
-            throw new ResponseStatusException(FORBIDDEN, "Not authorized to access this recording");
-        }
-
-        return recording;
+    @Transactional(readOnly = true)
+    public String getRecordingFilePath(Long recordingId) {
+        Recording recording = recordingRepository.findById(recordingId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Enregistrement non trouvé"));
+        return recording.getFilePath();
     }
 
     @Transactional
-    public void deleteRecording(Long sessionId, Jwt jwt) {
-        LivestreamSession session = validateSessionForRecording(sessionId, jwt);
-
-        Recording recording = recordingRepository.findBySession(session)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "No recording found for this session"));
+    public void deleteRecording(Long recordingId, String token) {
+        Recording recording = recordingRepository.findById(recordingId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Enregistrement non trouvé"));
 
         try {
             // Supprimer le fichier physique
-            Path recordingPath = Paths.get(recording.getFilePath());
-            if (Files.exists(recordingPath)) {
-                Files.delete(recordingPath);
-                log.info("Deleted recording file: {}", recordingPath);
+            Path filePath = Paths.get(recording.getFilePath());
+            if (Files.exists(filePath)) {
+                Files.delete(filePath);
+                log.info("Deleted recording file: {}", filePath);
             }
 
-            // Supprimer l'entrée en base de données
+            // Supprimer l'entrée en base
             recordingRepository.delete(recording);
 
-            // Nettoyer la référence dans la session
-            session.setRecordingPath(null);
-            sessionRepository.save(session);
-
-            log.info("Recording deleted successfully for session {}", sessionId);
+            log.info("Recording deleted successfully: {}", recording.getFileName());
 
         } catch (IOException e) {
             log.error("Failed to delete recording file", e);
-            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Failed to delete recording");
+            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Échec de suppression");
         }
     }
 
-    // Méthodes privées utilitaires
+    // Méthodes privées helper
 
-    private LivestreamSession validateSessionForRecording(Long sessionId, Jwt jwt) {
-        LivestreamSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Session not found"));
-
-        // Récupérer l'utilisateur actuel
-        String token = "Bearer " + jwt.getTokenValue();
-        UserResponse currentUser = userServiceClient.getUserByKeycloakId(jwt.getSubject(), token);
-
-        // Vérifier que l'utilisateur est le producteur
-        if (!session.getProducerId().equals(currentUser.id())) {
-            throw new ResponseStatusException(FORBIDDEN, "Only the producer can manage recordings");
+    private String getSkillName(Integer skillId, String token) {
+        try {
+            var skill = skillServiceClient.getSkillById(skillId);
+            return skill != null ? skill.name() : "Unknown";
+        } catch (Exception e) {
+            log.error("Failed to fetch skill name", e);
+            return "Recording";
         }
-
-        // Vérifier que la session est en cours
-        if (!"LIVE".equals(session.getStatus())) {
-            throw new ResponseStatusException(BAD_REQUEST, "Session must be live to manage recordings");
-        }
-
-        return session;
     }
 
-    private LivestreamSession getSessionWithAuth(Long sessionId, Jwt jwt) {
-        LivestreamSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Session not found"));
+    private String generateRecordingFileName(String skillName, long recordingNumber, String format) {
+        // Nettoyer le nom de la compétence (remplacer caractères spéciaux)
+        String cleanSkillName = skillName.replaceAll("[^a-zA-Z0-9]", "_");
+        String extension = format != null && !format.isEmpty() ? format : "mp4";
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
 
-        // Récupérer l'utilisateur actuel
-        String token = "Bearer " + jwt.getTokenValue();
-        UserResponse currentUser = userServiceClient.getUserByKeycloakId(jwt.getSubject(), token);
-
-        // Vérifier que l'utilisateur est autorisé
-        if (!session.getProducerId().equals(currentUser.id()) &&
-                !session.getReceiverIds().contains(currentUser.id())) {
-            throw new ResponseStatusException(FORBIDDEN, "Not authorized to access this session");
-        }
-
-        return session;
+        // Format: SkillName_1_20240101_143022.mp4
+        return String.format("%s_%d_%s.%s", cleanSkillName, recordingNumber, timestamp, extension);
     }
 
     private List<Long> getAllAuthorizedUsers(LivestreamSession session) {
-        List<Long> authorizedUsers = new java.util.ArrayList<>(session.getReceiverIds());
-        authorizedUsers.add(session.getProducerId());
-        return authorizedUsers;
-    }
+        List<Long> authorizedUsers = new ArrayList<>();
 
-    private String generateFileName(Long sessionId, String recordingId, String format) {
-        String extension = format != null && !format.isEmpty() ? format : "mp4";
-        return String.format("session_%d_%s_%s.%s",
-                sessionId,
-                recordingId,
-                LocalDateTime.now().toString().replaceAll("[^a-zA-Z0-9]", "_"),
-                extension);
+        // Ajouter le producteur
+        if (session.getProducerId() != null) {
+            authorizedUsers.add(session.getProducerId());
+        }
+
+        // Ajouter les receveurs
+        if (session.getReceiverIds() != null) {
+            authorizedUsers.addAll(session.getReceiverIds());
+        }
+
+        return authorizedUsers.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private void checkDiskSpace(Path path) throws IOException {
-        long usableSpace = Files.getFileStore(path.getParent()).getUsableSpace();
-        long requiredSpace = parseSize(maxRecordingSize);
+        long usableSpace = Files.getFileStore(path).getUsableSpace();
+        long requiredSpace = 1024L * 1024L * 1024L; // 1GB minimum
 
         if (usableSpace < requiredSpace) {
-            throw new IOException("Insufficient disk space for recording. Available: " +
-                    formatBytes(usableSpace) + ", Required: " + formatBytes(requiredSpace));
+            throw new IOException("Espace disque insuffisant");
         }
     }
 
-    private long parseSize(String size) {
-        // Simple parser pour convertir "1GB" en bytes
-        size = size.toUpperCase().trim();
-        long multiplier = 1;
-
-        if (size.endsWith("GB")) {
-            multiplier = 1024L * 1024L * 1024L;
-            size = size.substring(0, size.length() - 2);
-        } else if (size.endsWith("MB")) {
-            multiplier = 1024L * 1024L;
-            size = size.substring(0, size.length() - 2);
-        } else if (size.endsWith("KB")) {
-            multiplier = 1024L;
-            size = size.substring(0, size.length() - 2);
-        }
-
-        try {
-            return Long.parseLong(size.trim()) * multiplier;
-        } catch (NumberFormatException e) {
-            return 1024L * 1024L * 1024L; // Default 1GB
-        }
+    private long calculateDuration(LocalDateTime start, LocalDateTime end) {
+        if (start == null || end == null) return 0;
+        return java.time.Duration.between(start, end).getSeconds();
     }
 
-    private String formatBytes(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return (bytes / 1024) + " KB";
-        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)) + " MB";
-        return (bytes / (1024 * 1024 * 1024)) + " GB";
+    private RecordingResponse mapToResponse(Recording recording) {
+        return RecordingResponse.builder()
+                .recordingId(recording.getId().toString())
+                .sessionId(recording.getSession().getId())
+                .fileName(recording.getFileName())
+                .skillName(recording.getSkillName())
+                .recordingNumber(recording.getRecordingNumber())
+                .status(recording.getStatus())
+                .startTime(recording.getStartedAt())
+                .endTime(recording.getEndedAt())
+                .duration(recording.getDuration())
+                .fileSize(recording.getFileSize())
+                .downloadUrl("/api/v1/livestream/recordings/download/" + recording.getId())
+                .build();
     }
 
-    private RecordingResponse mapToRecordingResponse(Recording recording) {
-        return new RecordingResponse(
-                recording.getId().toString(),
-                recording.getSession().getId(),
-                "COMPLETED",
-                recording.getCreatedAt(),
-                recording.getCreatedAt(),
-                "/api/v1/livestream/recordings/" + recording.getSession().getId()
-        );
-    }
-
-    // Méthode pour nettoyer les anciens enregistrements
+    // Méthode de nettoyage périodique
     @Transactional
     public void cleanupOldRecordings() {
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(retentionDays);
@@ -366,10 +305,9 @@ public class RecordingService {
 
         for (Recording recording : oldRecordings) {
             try {
-                Path recordingPath = Paths.get(recording.getFilePath());
-                if (Files.exists(recordingPath)) {
-                    Files.delete(recordingPath);
-                    log.info("Deleted old recording file: {}", recordingPath);
+                Path filePath = Paths.get(recording.getFilePath());
+                if (Files.exists(filePath)) {
+                    Files.delete(filePath);
                 }
                 recordingRepository.delete(recording);
             } catch (IOException e) {

@@ -1,11 +1,20 @@
 package com.example.servicelivestream.dto;
 
-public record RecordingRequest(
-        String format,
-        String quality,
-        boolean includeChat
-) {
-    public RecordingRequest() {
-        this("mp4", "high", false);
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class RecordingRequest {
+    private String format;
+    private String quality;
+    private Boolean includeChat;
+
+    public String format() {
+        return format != null ? format : "mp4";
     }
 }

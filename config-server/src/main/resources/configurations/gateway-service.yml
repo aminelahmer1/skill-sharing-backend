@@ -203,3 +203,5 @@ livekit:
     storage-path: ./recordings
     max-size: 1GB
     format: mp4
+    realistic-simulation: true
+

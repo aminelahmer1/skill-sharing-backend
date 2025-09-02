@@ -165,6 +165,7 @@ application:
     formats:
       - mp4
       - webm
+    realistic-simulation: true
 
   # Configuration des notifications
   notifications:

@@ -135,32 +135,8 @@ public class LivestreamController {
 
         return ResponseEntity.ok(session);
     }
-    @PostMapping("/{sessionId}/recording/start")
-    public ResponseEntity<RecordingResponse> startRecording(
-            @PathVariable Long sessionId,
-            @RequestBody RecordingRequest request,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
-        RecordingResponse response = recordingService.startRecording(sessionId, request, jwt);
-        return ResponseEntity.ok(response);
-    }
 
-    @PostMapping("/{sessionId}/recording/stop")
-    public ResponseEntity<Void> stopRecording(
-            @PathVariable Long sessionId,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
-        recordingService.stopRecording(sessionId, jwt);
-        return ResponseEntity.ok().build();
-    }
 
-    @GetMapping("/{sessionId}/recording/status")
-    public ResponseEntity<RecordingResponse> getRecordingStatus(
-            @PathVariable Long sessionId,
-            @AuthenticationPrincipal Jwt jwt
-    ) {
-        RecordingResponse status = recordingService.getRecordingStatus(sessionId, jwt);
-        return ResponseEntity.ok(status);
-    }
+
 
 }
