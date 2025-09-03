@@ -71,4 +71,5 @@ public class CalendarController {
         List<CalendarEventResponse> events = calendarService.getUpcomingEvents(days, jwt);
         return ResponseEntity.ok(events);
     }
+
 }

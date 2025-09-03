@@ -262,4 +262,53 @@ public interface ExchangeRepository extends JpaRepository<Exchange, Integer> {
     ORDER BY e.skillId, e.createdAt DESC
     """)
     List<Exchange> findValidExchangesBySkillIds(@Param("skillIds") List<Integer> skillIds);
+
+    /**
+     * Récupère tous les skills d'un producteur avec leurs receivers
+     */
+    @Query("""
+    SELECT DISTINCT e.skillId 
+    FROM Exchange e 
+    WHERE e.producerId = :producerId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.skillId
+    """)
+    List<Integer> findSkillIdsWithReceivers(@Param("producerId") Long producerId);
+
+    /**
+     * Récupère tous les receivers pour un skill spécifique d'un producteur
+     */
+    @Query("""
+    SELECT e FROM Exchange e 
+    WHERE e.producerId = :producerId 
+    AND e.skillId = :skillId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    ORDER BY e.createdAt DESC
+    """)
+    List<Exchange> findReceiversBySkillId(@Param("producerId") Long producerId, @Param("skillId") Integer skillId);
+
+    /**
+     * Récupère toutes les compétences du producteur avec leurs échanges groupés
+     */
+    @Query("""
+    SELECT e FROM Exchange e 
+    WHERE e.producerId = :producerId 
+    AND e.status NOT IN ('PENDING', 'REJECTED', 'CANCELLED')
+    AND e.streamingDate BETWEEN :startDate AND :endDate
+    ORDER BY e.skillId, e.streamingDate, e.createdAt DESC
+    """)
+    List<Exchange> findProducerSkillsWithReceivers(
+            @Param("producerId") Long producerId,
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate);
+
+
+
+
+
+
+
+
+
+
 }

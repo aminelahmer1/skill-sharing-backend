@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -41,29 +42,81 @@ public class CalendarService {
                 .collect(Collectors.toList());
     }
 
+    // Dans CalendarService.java - Remplacer la méthode getProducerEvents
+
     @Transactional(readOnly = true)
     public List<CalendarEventResponse> getProducerEvents(LocalDate startDate, LocalDate endDate, Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
         UserResponse producer = getUserByKeycloakId(jwt.getSubject(), token);
 
-        log.info("Fetching producer events for user {}", producer.id());
+        log.info("Fetching producer events grouped by skill for user {}", producer.id());
 
-        List<Exchange> exchanges = exchangeRepository.findByProducerId(producer.id());
+        LocalDateTime startDateTime = startDate.atStartOfDay();
+        LocalDateTime endDateTime = endDate.atTime(23, 59, 59);
+
+        // Récupérer tous les échanges du producteur
+        List<Exchange> exchanges = exchangeRepository.findProducerSkillsWithReceivers(
+                producer.id(), startDateTime, endDateTime);
+
+        if (exchanges.isEmpty()) {
+            log.info("No exchanges found for producer {}", producer.id());
+            return List.of();
+        }
+
+        // Grouper par skillId et créer un événement par skill
+        Map<Integer, List<Exchange>> exchangesBySkill = exchanges.stream()
+                .collect(Collectors.groupingBy(Exchange::getSkillId));
+
         List<CalendarEventResponse> events = new ArrayList<>();
 
-        for (Exchange exchange : exchanges) {
-            if (isWithinDateRange(exchange, startDate, endDate)) {
-                CalendarEventResponse event = mapToCalendarEvent(exchange, producer.id(), token);
-                if (event != null) {
-                    event.setRole("PRODUCER");
-                    events.add(event);
-                }
+        for (Map.Entry<Integer, List<Exchange>> entry : exchangesBySkill.entrySet()) {
+            Integer skillId = entry.getKey();
+            List<Exchange> skillExchanges = entry.getValue();
+
+            try {
+                // Prendre le premier échange pour les infos de base
+                Exchange representativeExchange = skillExchanges.get(0);
+
+                SkillResponse skill = skillServiceClient.getSkillById(skillId);
+
+                // Construire le nom avec le nombre de receivers
+                String receiversInfo = skillExchanges.size() + " participant" +
+                        (skillExchanges.size() > 1 ? "s" : "");
+
+                CalendarEventResponse event = CalendarEventResponse.builder()
+                        .id(representativeExchange.getId()) // ID du premier échange
+                        .skillId(skillId)
+                        .skillName(skill.name())
+                        .skillDescription(skill.description())
+                        .producerId(producer.id())
+                        .producerName(producer.firstName() + " " + producer.lastName())
+                        .receiverId(0L) // ID factice pour indiquer "groupé"
+                        .receiverName(receiversInfo)
+                        .status(representativeExchange.getStatus())
+                        .streamingDate(representativeExchange.getStreamingDate())
+                        .streamingTime(skill.streamingTime())
+                        .price(skill.price())
+                        .categoryName(skill.categoryName())
+                        .role("PRODUCER")
+                        .eventType(determineEventType(representativeExchange.getStatus()))
+                        .color(determineEventColor(representativeExchange.getStatus(), "PRODUCER"))
+                        .createdAt(representativeExchange.getCreatedAt())
+                        .updatedAt(representativeExchange.getUpdatedAt())
+                        .build();
+
+                events.add(event);
+
+                log.info("Added grouped event for skill {} with {} receivers",
+                        skill.name(), skillExchanges.size());
+
+            } catch (Exception e) {
+                log.error("Error processing skill {}: {}", skillId, e.getMessage());
             }
         }
 
+        log.info("Returning {} grouped events for producer {}", events.size(), producer.id());
         return events;
     }
-
     @Transactional(readOnly = true)
     public List<CalendarEventResponse> getReceiverEvents(LocalDate startDate, LocalDate endDate, Jwt jwt) {
         String token = "Bearer " + jwt.getTokenValue();
