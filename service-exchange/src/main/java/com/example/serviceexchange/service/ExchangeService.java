@@ -11,6 +11,7 @@ import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,7 +32,8 @@ public class ExchangeService {
     private final UserServiceClient userServiceClient;
     private final NotificationService notificationService;
     private final ExchangeValidator exchangeValidator;
-
+    private final ReminderSchedulerService reminderSchedulerService;
+    private final KafkaTemplate<String, NotificationEvent> kafkaTemplate;
     private static final String ONLY_PRODUCER_CAN_PERFORM_ACTION = "Only the producer can perform this action";
     private static final String ONLY_RECEIVERS_CAN_CREATE_EXCHANGES = "Only receivers can create exchanges";
     private static final String YOU_CAN_ONLY_CREATE_EXCHANGES_FOR_YOURSELF = "You can only create exchanges for yourself";
@@ -229,6 +232,8 @@ public class ExchangeService {
         Exchange updatedExchange = exchangeRepository.save(exchange);
         log.info("Exchange ID {} updated to status: {}", updatedExchange.getId(), updatedExchange.getStatus());
 
+        reminderSchedulerService.checkImmediateReminders(updatedExchange);
+
         UserResponse producer = fetchUserById(exchange.getProducerId(), token);
         UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
         notificationService.notifyRequestAccepted(receiver, producer, skill, exchangeId);
@@ -377,11 +382,9 @@ public class ExchangeService {
         Exchange exchange = getExchange(exchangeId);
         String token = "Bearer " + jwt.getTokenValue();
 
-        // Récupérer les rôles de l'utilisateur
         List<String> roles = jwt.getClaimAsStringList("roles");
         boolean isServiceAccount = roles != null && roles.contains("SERVICE_ACCOUNT");
 
-        // Valider l'utilisateur
         if (!isServiceAccount) {
             UserResponse user = getAuthenticatedUser(jwt);
             if (!user.id().equals(exchange.getProducerId())) {
@@ -389,22 +392,77 @@ public class ExchangeService {
             }
         }
 
-        // CORRECTION: Utilisation de la nouvelle signature
         exchangeValidator.validateStatusTransition(exchange, status);
 
-        // Mettre à jour le statut
+        // CORRECTION: Vérifier le statut AVANT de l'assigner pour éviter les doubles notifications
+        String previousStatus = exchange.getStatus();
+
+        // Si le statut passe à IN_PROGRESS ET que ce n'était pas déjà IN_PROGRESS
+        if ("IN_PROGRESS".equals(status) && !"IN_PROGRESS".equals(previousStatus)) {
+            sendLivestreamStartedNotification(exchange, token);
+            log.info("LIVESTREAM_STARTED notification sent for status change: {} -> {}", previousStatus, status);
+        }
+
         exchange.setStatus(status);
         exchangeRepository.save(exchange);
-        log.info("Exchange ID {} status updated to {}", exchangeId, status);
+        log.info("Exchange ID {} status updated from {} to {}", exchangeId, previousStatus, status);
 
-        // Envoyer les notifications seulement pour les comptes utilisateurs normaux
-        if (!isServiceAccount) {
+        if (!isServiceAccount && !status.equals(previousStatus)) {
             SkillResponse skill = fetchSkill(exchange.getSkillId());
             UserResponse receiver = fetchUserById(exchange.getReceiverId(), token);
             UserResponse producer = fetchUserById(exchange.getProducerId(), token);
-
             sendStatusNotification(status, receiver, producer, skill, exchange);
         }
+    }
+
+    private final Set<String> sentLivestreamNotifications = ConcurrentHashMap.newKeySet();
+
+
+    private void sendLivestreamStartedNotification(Exchange exchange, String token) {
+        String notificationKey = exchange.getId() + "_livestream_started";
+
+        // Vérifier si déjà envoyé
+        if (sentLivestreamNotifications.contains(notificationKey)) {
+            log.warn("Livestream notification already sent for exchange ID: {}", exchange.getId());
+            return;
+        }
+
+        try {
+            SkillResponse skill = fetchSkill(exchange.getSkillId());
+            if (skill == null) {
+                log.warn("Skill not found for livestream start notification, exchange ID: {}", exchange.getId());
+                return;
+            }
+
+            log.info("Sending livestream started notification for skill '{}' (ID: {}), exchange ID: {}",
+                    skill.name(), skill.id(), exchange.getId());
+
+//            NotificationEvent event = new NotificationEvent(
+//                    "LIVESTREAM_STARTED",
+//                    exchange.getId(),
+//                    exchange.getProducerId(),
+//                    exchange.getReceiverId(),
+//                    skill.name(),
+//                    null,
+//                    LocalDateTime.now().toString()
+//            );
+//
+//            kafkaTemplate.send("notifications", event);
+
+            // Marquer comme envoyé
+            sentLivestreamNotifications.add(notificationKey);
+
+            log.info("Livestream started notification sent via Kafka for exchange ID: {}, skill: '{}'",
+                    exchange.getId(), skill.name());
+
+        } catch (Exception e) {
+            log.error("Failed to send livestream started notification for exchange ID: {}: {}",
+                    exchange.getId(), e.getMessage(), e);
+        }
+    }
+    // AJOUTER cette méthode publique pour permettre à ReminderSchedulerService d'accéder aux skills
+    public SkillResponse fetchSkillById(Integer skillId) {
+        return fetchSkill(skillId);
     }
     private void sendStatusNotification(String status, UserResponse receiver,
                                         UserResponse producer, SkillResponse skill,
@@ -420,9 +478,7 @@ public class ExchangeService {
             case "SCHEDULED":
                 notificationService.notifySessionScheduled(receiver, producer, skill, exchange.getId());
                 break;
-            case "IN_PROGRESS":
-                notificationService.notifySessionStarted(receiver, producer, skill, exchange.getId());
-                break;
+
             case "COMPLETED":
                 notificationService.notifySessionCompleted(receiver, producer, skill, exchange.getId());
                 break;

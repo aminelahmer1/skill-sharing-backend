@@ -49,9 +49,11 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
-        spring.json.trusted.packages: "com.example.servicelivestream.dto,com.example.notification.event,com.example.serviceexchange.dto,java.util,java.lang"
-        spring.json.value.default.type: com.example.notification.event.NotificationEvent
+        spring.json.trusted.packages: "*"
+        spring.json.value.default.type: com.example.notification.dto.NotificationEvent
         spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.use.type.headers: false
+        spring.json.type.mapping: "event:com.example.notification.dto.NotificationEvent"
   mail:
     host: smtp.gmail.com
     port: 587
@@ -95,3 +97,7 @@ logging:
 notification:
   websocket:
     endpoint: /ws
+
+application:
+  config:
+    skill-url: ${SKILL_SERVICE_URL:http://localhost:8822/api/v1/skills}

@@ -7,8 +7,7 @@ import org.springframework.kafka.annotation.EnableKafka;
 
 @SpringBootApplication
 @EnableKafka
-@EnableFeignClients(basePackages = "com.example.serviceuser.client")
-public class NotificationApplication {
+@EnableFeignClients(basePackages = {"com.example.notification.client"})public class NotificationApplication {
     public static void main(String[] args) {
         SpringApplication.run(NotificationApplication.class, args);
     }
