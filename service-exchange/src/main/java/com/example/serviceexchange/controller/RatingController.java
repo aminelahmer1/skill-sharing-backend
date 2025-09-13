@@ -1,9 +1,11 @@
 package com.example.serviceexchange.controller;
 
+import com.example.serviceexchange.FeignClient.UserServiceClient;
 import com.example.serviceexchange.dto.*;
 import com.example.serviceexchange.service.RatingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -12,14 +14,14 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/exchanges/ratings")
 @RequiredArgsConstructor
 public class RatingController {
 
     private final RatingService ratingService;
-
+private final UserServiceClient userServiceClient;
     /**
      * Soumettre un rating pour un échange complété
      */
@@ -81,16 +83,16 @@ public class RatingController {
     public ResponseEntity<ProducerRatingStats> getMyRatingStats(
             @AuthenticationPrincipal Jwt jwt
     ) {
-        // Récupérer l'ID du producteur connecté depuis le JWT
-        String keycloakId = jwt.getSubject();
-        // Note: Vous devrez adapter cette partie selon comment vous récupérez l'ID utilisateur
-        // Pour simplifier, on suppose que vous avez une méthode pour obtenir l'ID depuis le Keycloak ID
-        Long producerId = getUserIdFromKeycloakId(keycloakId);
-
-        ProducerRatingStats stats = ratingService.getProducerRatingStats(producerId, jwt);
-        return ResponseEntity.ok(stats);
+        try {
+            ProducerRatingStats stats = ratingService.getMyRatingStats(jwt);
+            log.info("My rating stats retrieved: average={}, totalRatings={}",
+                    stats.averageRating(), stats.totalRatings());
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("Error getting my rating stats: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
     }
-
     /**
      * Récupérer les statistiques de rating d'une compétence
      */
@@ -133,5 +135,124 @@ public class RatingController {
         // Implémenter la logique pour récupérer l'ID utilisateur depuis Keycloak ID
         // Ceci est un placeholder
         return 1L;
+    }
+
+
+
+/**
+ * Récupérer les statistiques complètes du dashboard producteur
+ */
+    @GetMapping("/producer/dashboard")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<ProducerDashboardStats> getProducerDashboard(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String keycloakId = jwt.getSubject();
+        Long producerId = getUserIdFromKeycloakId(keycloakId, jwt);
+
+        ProducerDashboardStats stats = ratingService.getProducerDashboardStats(producerId, jwt);
+        return ResponseEntity.ok(stats);
+    }
+
+    /**
+     * Récupérer les statistiques d'engagement détaillées
+     */
+    @GetMapping("/producer/engagement")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<ProducerEngagementStats> getProducerEngagement(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String keycloakId = jwt.getSubject();
+        Long producerId = getUserIdFromKeycloakId(keycloakId, jwt);
+
+        ProducerEngagementStats stats = ratingService.getProducerEngagementStats(producerId, jwt);
+        return ResponseEntity.ok(stats);
+    }
+
+    /**
+     * Récupérer les statistiques de croissance
+     */
+    @GetMapping("/producer/growth")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<ProducerGrowthStats> getProducerGrowth(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String keycloakId = jwt.getSubject();
+        Long producerId = getUserIdFromKeycloakId(keycloakId, jwt);
+
+        ProducerGrowthStats stats = ratingService.getProducerGrowthStats(producerId, jwt);
+        return ResponseEntity.ok(stats);
+    }
+
+    /**
+     * Récupérer les statistiques de qualité
+     */
+    @GetMapping("/producer/quality")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<ProducerQualityStats> getProducerQuality(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String keycloakId = jwt.getSubject();
+        Long producerId = getUserIdFromKeycloakId(keycloakId, jwt);
+
+        ProducerQualityStats stats = ratingService.getProducerQualityStats(producerId, jwt);
+        return ResponseEntity.ok(stats);
+    }
+
+    /**
+     * Récupérer les données pour graphique d'activité mensuelle
+     */
+    @GetMapping("/producer/activity/monthly")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<List<MonthlyActivityData>> getMonthlyActivity(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String keycloakId = jwt.getSubject();
+        Long producerId = getUserIdFromKeycloakId(keycloakId, jwt);
+
+        ProducerDashboardStats dashboardStats = ratingService.getProducerDashboardStats(producerId, jwt);
+        return ResponseEntity.ok(dashboardStats.monthlyActivity());
+    }
+
+    /**
+     * Récupérer les performances par compétence
+     */
+    @GetMapping("/producer/skills/performance")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<List<SkillPerformanceData>> getSkillsPerformance(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String keycloakId = jwt.getSubject();
+        Long producerId = getUserIdFromKeycloakId(keycloakId, jwt);
+
+        ProducerDashboardStats dashboardStats = ratingService.getProducerDashboardStats(producerId, jwt);
+        return ResponseEntity.ok(dashboardStats.skillPerformance());
+    }
+
+    /**
+     * Récupérer l'évolution des notes
+     */
+    @GetMapping("/producer/ratings/evolution")
+    @PreAuthorize("hasRole('PRODUCER')")
+    public ResponseEntity<List<RatingEvolutionData>> getRatingEvolution(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String keycloakId = jwt.getSubject();
+        Long producerId = getUserIdFromKeycloakId(keycloakId, jwt);
+
+        ProducerDashboardStats dashboardStats = ratingService.getProducerDashboardStats(producerId, jwt);
+        return ResponseEntity.ok(dashboardStats.ratingEvolution());
+    }
+
+    // Améliorer la méthode helper existante
+    private Long getUserIdFromKeycloakId(String keycloakId, Jwt jwt) {
+        try {
+            String token = "Bearer " + jwt.getTokenValue();
+            UserResponse user = userServiceClient.getUserByKeycloakId(keycloakId, token);
+            return user.id();
+        } catch (Exception e) {
+            log.error("Failed to get user ID from Keycloak ID {}: {}", keycloakId, e.getMessage());
+            throw new RuntimeException("Failed to get user information", e);
+        }
     }
 }

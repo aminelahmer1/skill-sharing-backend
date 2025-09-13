@@ -313,4 +313,307 @@ public class RatingService {
             return null;
         }
     }
+
+    // ==============================================
+// CORRECTIONS POUR RatingService.java
+// ==============================================
+
+    /**
+     * Récupérer les statistiques complètes du dashboard producteur
+     */
+    @Transactional(readOnly = true)
+    public ProducerDashboardStats getProducerDashboardStats(Long producerId, Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+
+        // Calculate date ranges for current and last month
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime monthStart = now.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0);
+        LocalDateTime monthEnd = monthStart.plusMonths(1);
+        LocalDateTime lastMonthStart = monthStart.minusMonths(1);
+        LocalDateTime lastMonthEnd = monthStart;
+
+        // Calculate start date for charts (last 12 months)
+        LocalDateTime chartStartDate = now.minusMonths(12).withDayOfMonth(1);
+
+        // Métriques de base
+        int upcomingSessions = exchangeRepository.countUpcomingSessions(producerId);
+        List<Integer> skillIds = exchangeRepository.findSkillIdsByProducerId(producerId);
+        Double avgRating = exchangeRepository.calculateAverageRatingForProducer(producerId);
+        int totalStudents = exchangeRepository.countUniqueStudents(producerId);
+
+        // Performance
+        Double completionRate = exchangeRepository.calculateCompletionRate(producerId);
+        Double rebookingRate = exchangeRepository.calculateRebookingRate(producerId);
+        Double satisfactionRate = exchangeRepository.calculateSatisfactionRate(producerId);
+        Double responseTime = exchangeRepository.calculateAverageResponseTime(producerId);
+
+        // Croissance avec paramètres de dates corrects
+        int sessionsThisMonth = exchangeRepository.countSessionsThisMonth(producerId, monthStart, monthEnd);
+        int sessionsLastMonth = exchangeRepository.countSessionsLastMonth(producerId, lastMonthStart, lastMonthEnd);
+        double monthlyGrowthRate = calculateGrowthRate(sessionsThisMonth, sessionsLastMonth);
+        int newStudents = exchangeRepository.countNewStudentsThisMonth(producerId, monthStart, monthEnd);
+        int teachingHours = exchangeRepository.calculateTotalTeachingHours(producerId);
+
+        // Comparaison plateforme - CORRECTION: utiliser la méthode correcte
+        List<Object[]> allProducersRanking = exchangeRepository.getAllProducersRanking();
+        int ranking = calculateProducerRanking(producerId, allProducersRanking);
+        Double platformAvg = exchangeRepository.getPlatformAverageRating();
+
+        // Données pour graphiques avec paramètres corrects
+        List<MonthlyActivityData> monthlyActivity = buildMonthlyActivityData(producerId, chartStartDate);
+        List<SkillPerformanceData> skillPerformance = buildSkillPerformanceData(producerId, token);
+        List<RatingEvolutionData> ratingEvolution = buildRatingEvolutionData(producerId, chartStartDate);
+
+        return new ProducerDashboardStats(
+                upcomingSessions,
+                skillIds.size(),
+                roundToOneDecimal(avgRating),
+                totalStudents,
+                roundToOneDecimal(completionRate),
+                roundToOneDecimal(rebookingRate),
+                roundToOneDecimal(satisfactionRate),
+                roundToOneDecimal(responseTime),
+                sessionsThisMonth,
+                sessionsLastMonth,
+                monthlyGrowthRate,
+                newStudents,
+                teachingHours,
+                ranking,
+                roundToOneDecimal(platformAvg),
+                monthlyActivity,
+                skillPerformance,
+                ratingEvolution
+        );
+    }
+
+    /**
+     * Récupérer les statistiques d'engagement détaillées
+     */
+    @Transactional(readOnly = true)
+    public ProducerEngagementStats getProducerEngagementStats(Long producerId, Jwt jwt) {
+        Double completionRate = exchangeRepository.calculateCompletionRate(producerId);
+        Double avgDuration = exchangeRepository.calculateAverageSessionDuration(producerId);
+        Double rebookingRate = exchangeRepository.calculateRebookingRate(producerId);
+        int uniqueStudents = exchangeRepository.countUniqueStudents(producerId);
+
+        // Calcul des interactions totales
+        List<Exchange> allExchanges = exchangeRepository.findAllValidExchangesByProducerId(producerId);
+        int totalInteractions = allExchanges.size();
+
+        // Taux de rétention approximatif
+        double retentionRate = rebookingRate != null ? rebookingRate : 0.0;
+
+        return new ProducerEngagementStats(
+                roundToOneDecimal(completionRate),
+                roundToOneDecimal(avgDuration),
+                roundToOneDecimal(rebookingRate),
+                uniqueStudents,
+                totalInteractions,
+                retentionRate
+        );
+    }
+
+    /**
+     * Récupérer les statistiques de croissance
+     */
+    @Transactional(readOnly = true)
+    public ProducerGrowthStats getProducerGrowthStats(Long producerId, Jwt jwt) {
+        // Calculate date ranges
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime monthStart = now.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0);
+        LocalDateTime monthEnd = monthStart.plusMonths(1);
+        LocalDateTime lastMonthStart = monthStart.minusMonths(1);
+        LocalDateTime lastMonthEnd = monthStart;
+
+        int sessionsThisMonth = exchangeRepository.countSessionsThisMonth(producerId, monthStart, monthEnd);
+        int sessionsLastMonth = exchangeRepository.countSessionsLastMonth(producerId, lastMonthStart, lastMonthEnd);
+        double monthlyGrowth = calculateGrowthRate(sessionsThisMonth, sessionsLastMonth);
+        int newStudents = exchangeRepository.countNewStudentsThisMonth(producerId, monthStart, monthEnd);
+        int teachingHours = exchangeRepository.calculateTotalTeachingHours(producerId);
+
+        // Croissance année sur année (approximation)
+        double yearGrowth = monthlyGrowth * 12; // Simplification
+
+        return new ProducerGrowthStats(
+                sessionsThisMonth,
+                sessionsLastMonth,
+                monthlyGrowth,
+                newStudents,
+                teachingHours,
+                yearGrowth
+        );
+    }
+
+    /**
+     * Récupérer les statistiques de qualité
+     */
+    @Transactional(readOnly = true)
+    public ProducerQualityStats getProducerQualityStats(Long producerId, Jwt jwt) {
+        Double responseTime = exchangeRepository.calculateAverageResponseTime(producerId);
+        Double satisfactionRate = exchangeRepository.calculateSatisfactionRate(producerId);
+        Integer totalRatings = exchangeRepository.countRatingsForProducer(producerId);
+        Double avgRating = exchangeRepository.calculateAverageRatingForProducer(producerId);
+
+        // Distribution des ratings
+        List<Exchange> ratedExchanges = exchangeRepository.findCompletedExchangesWithRatings(producerId);
+        Map<Integer, Long> distribution = ratedExchanges.stream()
+                .collect(Collectors.groupingBy(Exchange::getReceiverRating, Collectors.counting()));
+
+        List<RatingDistribution> ratingDistribution = new ArrayList<>();
+        for (int stars = 1; stars <= 5; stars++) {
+            long count = distribution.getOrDefault(stars, 0L);
+            double percentage = totalRatings > 0 ? (count * 100.0) / totalRatings : 0.0;
+            ratingDistribution.add(new RatingDistribution(stars, (int) count, percentage));
+        }
+
+        // Tendance qualité (comparaison 3 derniers mois vs 3 mois précédents)
+        LocalDateTime chartStartDate = LocalDateTime.now().minusMonths(12).withDayOfMonth(1);
+        String qualityTrend = calculateQualityTrend(producerId, chartStartDate);
+
+        return new ProducerQualityStats(
+                roundToOneDecimal(responseTime),
+                roundToOneDecimal(satisfactionRate),
+                totalRatings,
+                roundToOneDecimal(avgRating),
+                ratingDistribution,
+                qualityTrend
+        );
+    }
+
+// ==============================================
+// MÉTHODES HELPER PRIVÉES CORRIGÉES
+// ==============================================
+
+    private List<MonthlyActivityData> buildMonthlyActivityData(Long producerId, LocalDateTime startDate) {
+        List<Object[]> rawData = exchangeRepository.getMonthlyActivityData(producerId, startDate);
+        return rawData.stream()
+                .map(row -> new MonthlyActivityData(
+                        ((Number) row[0]).intValue(), // year
+                        ((Number) row[1]).intValue(), // month
+                        getMonthLabel(((Number) row[1]).intValue()),
+                        ((Number) row[2]).intValue(), // completed
+                        ((Number) row[3]).intValue()  // upcoming
+                ))
+                .collect(Collectors.toList());
+    }
+
+    private List<SkillPerformanceData> buildSkillPerformanceData(Long producerId, String token) {
+        List<Object[]> performanceData = exchangeRepository.getSkillPerformanceStats(producerId);
+        List<Object[]> pendingData = exchangeRepository.getPendingRequestsBySkill(producerId);
+
+        Map<Integer, Integer> pendingMap = pendingData.stream()
+                .collect(Collectors.toMap(
+                        row -> ((Number) row[0]).intValue(),
+                        row -> ((Number) row[1]).intValue()
+                ));
+
+        return performanceData.stream()
+                .map(row -> {
+                    int skillId = ((Number) row[0]).intValue();
+                    double avgRating = ((Number) row[1]).doubleValue();
+                    int sessions = ((Number) row[2]).intValue();
+                    int pending = pendingMap.getOrDefault(skillId, 0);
+
+                    String skillName = getSkillName(skillId);
+                    boolean isTopPerforming = avgRating >= 4.5 && sessions >= 5;
+
+                    return new SkillPerformanceData(
+                            skillId, skillName, avgRating, sessions, pending, isTopPerforming
+                    );
+                })
+                .collect(Collectors.toList());
+    }
+
+    private List<RatingEvolutionData> buildRatingEvolutionData(Long producerId, LocalDateTime startDate) {
+        List<Object[]> rawData = exchangeRepository.getRatingEvolutionData(producerId, startDate);
+        return rawData.stream()
+                .map(row -> new RatingEvolutionData(
+                        ((Number) row[0]).intValue(),
+                        ((Number) row[1]).intValue(),
+                        getMonthLabel(((Number) row[1]).intValue()),
+                        ((Number) row[2]).doubleValue()
+                ))
+                .collect(Collectors.toList());
+    }
+
+    private double calculateGrowthRate(int current, int previous) {
+        if (previous == 0) return current > 0 ? 100.0 : 0.0;
+        return ((double) (current - previous) / previous) * 100.0;
+    }
+
+    private int calculateProducerRanking(Long producerId, List<Object[]> allProducersRanking) {
+        for (int i = 0; i < allProducersRanking.size(); i++) {
+            Long currentProducerId = ((Number) allProducersRanking.get(i)[0]).longValue();
+            if (currentProducerId.equals(producerId)) {
+                return i + 1; // Position dans le ranking (1-based)
+            }
+        }
+        return 0; // Non classé
+    }
+
+    private String calculateQualityTrend(Long producerId, LocalDateTime startDate) {
+        // Logique pour déterminer la tendance
+        // Comparaison des 3 derniers mois vs 3 mois précédents
+        List<Object[]> recentData = exchangeRepository.getRatingEvolutionData(producerId, startDate);
+
+        if (recentData.size() < 3) return "STABLE";
+
+        double recentAvg = recentData.stream()
+                .limit(3)
+                .mapToDouble(row -> ((Number) row[2]).doubleValue())
+                .average()
+                .orElse(0.0);
+
+        double previousAvg = recentData.stream()
+                .skip(3)
+                .limit(3)
+                .mapToDouble(row -> ((Number) row[2]).doubleValue())
+                .average()
+                .orElse(recentAvg);
+
+        if (recentAvg > previousAvg + 0.2) return "IMPROVING";
+        if (recentAvg < previousAvg - 0.2) return "DECLINING";
+        return "STABLE";
+    }
+
+    private String getMonthLabel(int month) {
+        String[] months = {"Jan", "Fév", "Mar", "Avr", "Mai", "Jun",
+                "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"};
+        return months[month - 1];
+    }
+    /**
+     * Récupérer ses propres statistiques (producteur connecté)
+     */
+    @Transactional(readOnly = true)
+    public ProducerRatingStats getMyRatingStats(Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+
+        // Obtenir l'utilisateur connecté
+        UserResponse currentUser = getUserByKeycloakId(jwt.getSubject(), token);
+
+        log.info("Getting rating stats for connected producer: {}", currentUser.id());
+
+        // Utiliser la méthode existante avec l'ID du producteur connecté
+        return getProducerRatingStats(currentUser.id(), jwt);
+    }
+    private String getSkillName(int skillId) {
+        try {
+            SkillResponse skill = skillServiceClient.getSkillById(skillId);
+            return skill != null ? skill.name() : "Compétence #" + skillId;
+        } catch (Exception e) {
+            return "Compétence #" + skillId;
+        }
+    }
+
+    private double roundToOneDecimal(Double value) {
+        return value != null ? Math.round(value * 10.0) / 10.0 : 0.0;
+    }
+
+
+
+
+
+
+
+
 }
