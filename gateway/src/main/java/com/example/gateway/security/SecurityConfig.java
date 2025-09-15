@@ -58,7 +58,9 @@ public class SecurityConfig {
             "/rtc",
             "/rtc/**",
             "/livekit",
-            "/livekit/**"
+            "/livekit/**",
+            "/api/egress",
+            "/api/egress/**"
     };
 
     // ✅ API endpoints authentifiés

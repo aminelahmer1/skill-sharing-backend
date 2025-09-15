@@ -130,7 +130,21 @@ spring:
               - RewritePath=/ws/messaging/info(?<segment>.*), /ws/info${segment}
 
 
+        # ----------  Recording API (Egress)  ----------
+        - id: livekit-egress-api
+          uri: http://localhost:7885          # ← port du conteneur egress
+          predicates:
+            - Path=/api/egress/**
+          filters:
+            - StripPrefix=1                  # enlève « /api/egress » → « / »
 
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 500MB
+      max-request-size: 500MB
+      resolve-lazily: false
 
 
 
@@ -163,7 +177,7 @@ livekit:
   url: ws://localhost:7880
   api-key: testkey
   api-secret: akQ2cFd4OEx0UDlyWmU3MnNZcTNtWGZOdEE0a1Z1MTIzCg==
-  server-url: http://localhost:7880
+  server-url: http://localhost:7885
   cors:
     allowed_origins:
       - "http://localhost:4200"
@@ -202,6 +216,13 @@ livekit:
     enabled: true
     storage-path: ./recordings
     max-size: 1GB
-    format: mp4
+    directory: ${RECORDING_DIRECTORY:./recordings}
+    min-duration-seconds: ${RECORDING_MIN_DURATION:5}  # ✅ Minimum 5 secondes
+    max-duration-seconds: ${RECORDING_MAX_DURATION:1800} # ✅ Maximum 30 minutes
+    retention-days: ${RECORDING_RETENTION:30}
+    auto-cleanup: ${RECORDING_AUTO_CLEANUP:true}
+    formats:
+        - mp4
+        - webm
     realistic-simulation: true
 

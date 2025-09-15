@@ -42,8 +42,9 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/**").permitAll()
                         // Webhook endpoint public
                         .requestMatchers("/webhook/**").permitAll()
+                                .requestMatchers("/api/egress", "/api/egress/**").permitAll()
 
-                        // API endpoints nécessitent authentification
+                                // API endpoints nécessitent authentification
                         .requestMatchers("/api/v1/livestream/**").authenticated()
 
                         .anyRequest().authenticated()

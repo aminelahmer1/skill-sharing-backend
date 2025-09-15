@@ -10,6 +10,7 @@ import com.example.servicelivestream.repository.RecordingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -43,155 +44,145 @@ public class RecordingService {
     @Value("${application.recording.retention-days:30}")
     private int retentionDays;
 
+    @Value("${application.recording.default-duration-seconds:30}")
+    private int defaultRecordingDuration;
+
+    // ========== DÉMARRAGE ENREGISTREMENT ==========
+
     @Transactional
     public RecordingResponse startRecording(Long sessionId, RecordingRequest request, String token) {
-        log.info("Starting recording for session: {}", sessionId);
+        log.info("=== STARTING RECORDING SERVICE ===");
+        log.info("Session ID: {}", sessionId);
 
-        LivestreamSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Session not found"));
+        LivestreamSession session = findSession(sessionId);
 
-        // Vérifier si un enregistrement est déjà en cours
-        boolean hasActiveRecording = recordingRepository.findBySessionIdAndStatus(sessionId, "RECORDING")
-                .isPresent();
+        // NOUVEAU: Nettoyer les enregistrements orphelins avant de commencer
+        cleanupOrphanRecordings(sessionId);
 
-        if (hasActiveRecording) {
-            throw new ResponseStatusException(CONFLICT, "Un enregistrement est déjà en cours pour cette session");
-        }
+        validateNoActiveRecording(sessionId);
 
-        // Récupérer le nom de la compétence
         String skillName = getSkillName(session.getSkillId(), token);
-
-        // Compter les enregistrements existants pour cette session
         long recordingCount = recordingRepository.countBySessionId(sessionId);
+        String fileName = generateFileName(skillName, recordingCount + 1, request.format());
 
-        // Générer le nom du fichier avec le nom de la compétence et le numéro
-        String fileName = generateRecordingFileName(skillName, recordingCount + 1, request.format());
-
-        // Créer le chemin complet avec sous-dossier par session
-        Path sessionDir = Paths.get(recordingDirectory, "session_" + sessionId);
-        Path recordingPath = sessionDir.resolve(fileName);
+        Path recordingPath = createRecordingPath(sessionId, fileName);
 
         try {
-            // Créer les répertoires nécessaires
-            Files.createDirectories(sessionDir);
-            log.info("Created directory: {}", sessionDir);
+            Files.createDirectories(recordingPath.getParent());
+            checkDiskSpace(recordingPath.getParent());
 
-            // Vérifier l'espace disque
-            checkDiskSpace(sessionDir);
-
-            // Créer l'entité Recording avec statut temporaire
-            Recording recording = Recording.builder()
-                    .session(session)
-                    .filePath(recordingPath.toString())
-                    .fileName(fileName)
-                    .skillName(skillName)
-                    .recordingNumber((int) (recordingCount + 1))
-                    .status("RECORDING")
-                    .startedAt(LocalDateTime.now())
-                    .authorizedUsers(getAllAuthorizedUsers(session))
-                    .build();
-
+            Recording recording = createRecordingEntity(session, recordingPath, fileName, skillName, recordingCount + 1);
             Recording savedRecording = recordingRepository.save(recording);
 
-            // Démarrer l'enregistrement LiveKit
             liveKitService.startRoomRecording(session.getRoomName(), recordingPath.toString());
 
-            log.info("Recording started: {} at path {}", fileName, recordingPath);
+            log.info("=== RECORDING STARTED SUCCESSFULLY ===");
+            log.info("File: {} at {}", fileName, recordingPath);
 
-            return RecordingResponse.builder()
-                    .recordingId(savedRecording.getId().toString())
-                    .sessionId(sessionId)
-                    .fileName(fileName)
-                    .skillName(skillName)
-                    .recordingNumber((int) (recordingCount + 1))
-                    .status("RECORDING")
-                    .startTime(savedRecording.getStartedAt())
-                    .build();
+            return mapToResponse(savedRecording);
 
         } catch (IOException e) {
-            log.error("Failed to create recording directory", e);
+            log.error("Failed to create recording", e);
             throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Échec de création du répertoire");
         }
     }
 
+    // ========== ARRÊT ENREGISTREMENT ==========
+
     @Transactional
     public void stopRecording(Long sessionId, String token) {
-        log.info("Stopping recording for session: {}", sessionId);
+        log.info("=== STOPPING RECORDING SERVICE ===");
+        log.info("Session ID: {}", sessionId);
 
-        LivestreamSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Session not found"));
-
-        // Récupérer l'enregistrement en cours
-        Recording recording = recordingRepository.findBySessionIdAndStatus(sessionId, "RECORDING")
-                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "Aucun enregistrement en cours"));
+        LivestreamSession session = findSession(sessionId);
+        Recording recording = findActiveRecording(sessionId);
 
         try {
-            // Arrêter l'enregistrement LiveKit
+            // Arrêter l'enregistrement
             liveKitService.stopRoomRecording(session.getRoomName());
 
-            // Attendre un peu pour que le fichier soit écrit
-            Thread.sleep(500);
+            // Mettre à jour l'enregistrement
+            updateRecordingStatus(recording);
 
-            // Mettre à jour le statut et les métadonnées
-            recording.setStatus("COMPLETED");
-            recording.setEndedAt(LocalDateTime.now());
-            recording.setDuration(calculateDuration(recording.getStartedAt(), recording.getEndedAt()));
-
-            // Vérifier que le fichier existe et obtenir sa taille
-            Path filePath = Paths.get(recording.getFilePath());
-            if (Files.exists(filePath)) {
-                long fileSize = Files.size(filePath);
-                recording.setFileSize(fileSize);
-                log.info("Recording file size: {} bytes", fileSize);
-            } else {
-                log.warn("Recording file not found immediately at: {}", filePath);
-                // Attendre encore un peu
-                Thread.sleep(1000);
-                if (Files.exists(filePath)) {
-                    recording.setFileSize(Files.size(filePath));
-                }
-            }
-
-            recordingRepository.save(recording);
-
-            log.info("Recording stopped successfully: {}", recording.getFileName());
+            log.info("=== RECORDING STOPPED SUCCESSFULLY ===");
+            log.info("File: {}", recording.getFileName());
 
         } catch (Exception e) {
-            log.error("Error handling recording file", e);
-            // Sauvegarder quand même l'enregistrement avec le statut COMPLETED
-            recording.setStatus("COMPLETED");
-            recording.setEndedAt(LocalDateTime.now());
-            recording.setDuration(calculateDuration(recording.getStartedAt(), recording.getEndedAt()));
-            recordingRepository.save(recording);
+            log.error("Error stopping recording", e);
+            markRecordingFailed(recording);
         }
     }
+    @Transactional
+    public void cleanupOrphanRecordings(Long sessionId) {
+        // CHANGÉ: Maintenant utilise une List
+        List<Recording> orphanRecordings = recordingRepository.findBySessionIdAndStatus(sessionId, "RECORDING");
+
+        for (Recording orphan : orphanRecordings) {
+            log.warn("Found orphan recording: {} for session {}", orphan.getId(), sessionId);
+
+            Path filePath = Paths.get(orphan.getFilePath());
+            if (Files.exists(filePath)) {
+                try {
+                    long fileSize = Files.size(filePath);
+                    if (fileSize > 1024) {
+                        orphan.setStatus("COMPLETED");
+                        orphan.setEndedAt(LocalDateTime.now());
+                        orphan.setFileSize(fileSize);
+                        orphan.setDuration(calculateDuration(orphan.getStartedAt(), orphan.getEndedAt()));
+                        log.info("Orphan recording {} marked as COMPLETED", orphan.getId());
+                    } else {
+                        orphan.setStatus("FAILED");
+                        orphan.setEndedAt(LocalDateTime.now());
+                        log.info("Orphan recording {} marked as FAILED (file too small)", orphan.getId());
+                    }
+                } catch (IOException e) {
+                    orphan.setStatus("FAILED");
+                    orphan.setEndedAt(LocalDateTime.now());
+                    log.error("Error checking orphan recording file", e);
+                }
+            } else {
+                orphan.setStatus("FAILED");
+                orphan.setEndedAt(LocalDateTime.now());
+                log.info("Orphan recording {} marked as FAILED (no file)", orphan.getId());
+            }
+
+            recordingRepository.save(orphan);
+        }
+    }
+
+    // Méthode scheduled pour nettoyer périodiquement
+    @Scheduled(fixedDelay = 300000) // Toutes les 5 minutes
+    public void cleanupStaleRecordings() {
+        LocalDateTime staleThreshold = LocalDateTime.now().minusMinutes(30);
+
+        List<Recording> staleRecordings = recordingRepository
+                .findByStatusAndStartedAtBefore("RECORDING", staleThreshold);
+
+        for (Recording stale : staleRecordings) {
+            log.info("Auto-cleanup stale recording: {}", stale.getId());
+            cleanupOrphanRecordings(stale.getSession().getId());
+        }
+    }
+    // ========== CONSULTATION ENREGISTREMENTS ==========
 
     @Transactional(readOnly = true)
     public List<RecordingResponse> getSessionRecordings(Long sessionId, String token) {
         List<Recording> recordings = recordingRepository.findBySessionIdOrderByRecordingNumberAsc(sessionId);
-
-        return recordings.stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+        log.info("Found {} recordings for session {}", recordings.size(), sessionId);
+        return recordings.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<RecordingResponse> getUserRecordings(Long userId, String token) {
-        // Récupérer tous les enregistrements où l'utilisateur est autorisé
         List<Recording> recordings = recordingRepository.findByAuthorizedUsersContaining(userId);
-
         log.info("Found {} recordings for user {}", recordings.size(), userId);
-
-        return recordings.stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+        return recordings.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public RecordingResponse getRecordingById(Long recordingId, String token) {
         Recording recording = recordingRepository.findById(recordingId)
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Enregistrement non trouvé"));
-
         return mapToResponse(recording);
     }
 
@@ -201,6 +192,8 @@ public class RecordingService {
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Enregistrement non trouvé"));
         return recording.getFilePath();
     }
+
+    // ========== SUPPRESSION ENREGISTREMENT ==========
 
     @Transactional
     public void deleteRecording(Long recordingId, String token) {
@@ -212,67 +205,167 @@ public class RecordingService {
             Path filePath = Paths.get(recording.getFilePath());
             if (Files.exists(filePath)) {
                 Files.delete(filePath);
-                log.info("Deleted recording file: {}", filePath);
+                log.info("Physical file deleted: {}", filePath);
             }
 
-            // Supprimer l'entrée en base
+            // Supprimer de la base de données
             recordingRepository.delete(recording);
-
-            log.info("Recording deleted successfully: {}", recording.getFileName());
+            log.info("Recording deleted from database: {}", recording.getFileName());
 
         } catch (IOException e) {
             log.error("Failed to delete recording file", e);
-            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Échec de suppression");
+            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Échec de suppression du fichier");
         }
     }
 
-    // Méthodes privées helper
+    // ========== NETTOYAGE AUTOMATIQUE ==========
+
+    @Transactional
+    public void cleanupOldRecordings() {
+        LocalDateTime cutoffDate = LocalDateTime.now().minusDays(retentionDays);
+        List<Recording> oldRecordings = recordingRepository.findByCreatedAtBefore(cutoffDate);
+
+        for (Recording recording : oldRecordings) {
+            try {
+                deleteRecording(recording.getId(), null);
+            } catch (Exception e) {
+                log.error("Failed to cleanup recording: {}", recording.getFilePath(), e);
+            }
+        }
+
+        log.info("Cleaned up {} old recordings", oldRecordings.size());
+    }
+
+    // ========== MÉTHODES UTILITAIRES PRIVÉES ==========
+
+    private LivestreamSession findSession(Long sessionId) {
+        return sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Session non trouvée"));
+    }
+
+    private void validateNoActiveRecording(Long sessionId) {
+        // CHANGÉ: Utilise la List et vérifie si elle n'est pas vide
+        List<Recording> activeRecordings = recordingRepository.findBySessionIdAndStatus(sessionId, "RECORDING");
+        if (!activeRecordings.isEmpty()) {
+            throw new ResponseStatusException(CONFLICT, "Un enregistrement est déjà en cours");
+        }
+    }
+
+    private Recording findActiveRecording(Long sessionId) {
+        // CHANGÉ: Utilise la List et récupère le premier élément
+        List<Recording> activeRecordings = recordingRepository.findBySessionIdAndStatus(sessionId, "RECORDING");
+        if (activeRecordings.isEmpty()) {
+            throw new ResponseStatusException(BAD_REQUEST, "Aucun enregistrement en cours");
+        }
+        return activeRecordings.get(0);
+    }
 
     private String getSkillName(Integer skillId, String token) {
         try {
             var skill = skillServiceClient.getSkillById(skillId);
-            return skill != null ? skill.name() : "Unknown";
+            return skill != null ? skill.name() : "Unknown_Skill";
         } catch (Exception e) {
-            log.error("Failed to fetch skill name", e);
+            log.warn("Failed to fetch skill name for ID {}: {}", skillId, e.getMessage());
             return "Recording";
         }
     }
 
-    private String generateRecordingFileName(String skillName, long recordingNumber, String format) {
-        // Nettoyer le nom de la compétence (remplacer caractères spéciaux)
+    private String generateFileName(String skillName, long recordingNumber, String format) {
         String cleanSkillName = skillName.replaceAll("[^a-zA-Z0-9]", "_");
-        String extension = format != null && !format.isEmpty() ? format : "mp4";
+        String extension = (format != null && !format.isEmpty()) ? format : "mp4";
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
 
-        // Format: SkillName_1_20240101_143022.mp4
         return String.format("%s_%d_%s.%s", cleanSkillName, recordingNumber, timestamp, extension);
     }
 
-    private List<Long> getAllAuthorizedUsers(LivestreamSession session) {
-        List<Long> authorizedUsers = new ArrayList<>();
+    private Path createRecordingPath(Long sessionId, String fileName) {
+        Path sessionDir = Paths.get(recordingDirectory, "session_" + sessionId);
+        return sessionDir.resolve(fileName);
+    }
 
-        // Ajouter le producteur
+    private Recording createRecordingEntity(LivestreamSession session, Path recordingPath,
+                                            String fileName, String skillName, long recordingNumber) {
+        return Recording.builder()
+                .session(session)
+                .filePath(recordingPath.toString())
+                .fileName(fileName)
+                .skillName(skillName)
+                .recordingNumber((int) recordingNumber)
+                .status("RECORDING")
+                .startedAt(LocalDateTime.now())
+                .authorizedUsers(getAuthorizedUsers(session))
+                .build();
+    }
+
+    private List<Long> getAuthorizedUsers(LivestreamSession session) {
+        List<Long> users = new ArrayList<>();
+
         if (session.getProducerId() != null) {
-            authorizedUsers.add(session.getProducerId());
+            users.add(session.getProducerId());
         }
 
-        // Ajouter les receveurs
         if (session.getReceiverIds() != null) {
-            authorizedUsers.addAll(session.getReceiverIds());
+            users.addAll(session.getReceiverIds());
         }
 
-        return authorizedUsers.stream()
-                .filter(Objects::nonNull)
-                .distinct()
-                .collect(Collectors.toList());
+        return users.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
+    }
+
+    private void updateRecordingStatus(Recording recording) throws IOException {
+        // Attendre que le fichier soit disponible
+        waitForFile(recording);
+
+        recording.setStatus("COMPLETED");
+        recording.setEndedAt(LocalDateTime.now());
+        recording.setDuration(calculateDuration(recording.getStartedAt(), recording.getEndedAt()));
+
+        Path filePath = Paths.get(recording.getFilePath());
+        if (Files.exists(filePath)) {
+            recording.setFileSize(Files.size(filePath));
+        }
+
+        recordingRepository.save(recording);
+    }
+
+    private void waitForFile(Recording recording) {
+        Path filePath = Paths.get(recording.getFilePath());
+        int attempts = 10;
+
+        while (attempts > 0 && (!Files.exists(filePath) || getFileSize(filePath) < 1024)) {
+            try {
+                Thread.sleep(1000); // Attendre 1 seconde
+                attempts--;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        log.info("File verification completed. Exists: {}, Size: {} bytes",
+                Files.exists(filePath), getFileSize(filePath));
+    }
+
+    private long getFileSize(Path filePath) {
+        try {
+            return Files.exists(filePath) ? Files.size(filePath) : 0;
+        } catch (IOException e) {
+            return 0;
+        }
+    }
+
+    private void markRecordingFailed(Recording recording) {
+        recording.setStatus("FAILED");
+        recording.setEndedAt(LocalDateTime.now());
+        recording.setDuration(calculateDuration(recording.getStartedAt(), recording.getEndedAt()));
+        recordingRepository.save(recording);
     }
 
     private void checkDiskSpace(Path path) throws IOException {
         long usableSpace = Files.getFileStore(path).getUsableSpace();
-        long requiredSpace = 1024L * 1024L * 1024L; // 1GB minimum
+        long requiredSpace = 100L * 1024L * 1024L; // 100MB minimum
 
         if (usableSpace < requiredSpace) {
-            throw new IOException("Espace disque insuffisant");
+            throw new IOException("Espace disque insuffisant: " + (usableSpace / 1024 / 1024) + "MB disponible");
         }
     }
 
@@ -281,7 +374,7 @@ public class RecordingService {
         return java.time.Duration.between(start, end).getSeconds();
     }
 
-    private RecordingResponse mapToResponse(Recording recording) {
+    public  RecordingResponse mapToResponse(Recording recording) {
         return RecordingResponse.builder()
                 .recordingId(recording.getId().toString())
                 .sessionId(recording.getSession().getId())
@@ -295,26 +388,5 @@ public class RecordingService {
                 .fileSize(recording.getFileSize())
                 .downloadUrl("/api/v1/livestream/recordings/download/" + recording.getId())
                 .build();
-    }
-
-    // Méthode de nettoyage périodique
-    @Transactional
-    public void cleanupOldRecordings() {
-        LocalDateTime cutoffDate = LocalDateTime.now().minusDays(retentionDays);
-        List<Recording> oldRecordings = recordingRepository.findByCreatedAtBefore(cutoffDate);
-
-        for (Recording recording : oldRecordings) {
-            try {
-                Path filePath = Paths.get(recording.getFilePath());
-                if (Files.exists(filePath)) {
-                    Files.delete(filePath);
-                }
-                recordingRepository.delete(recording);
-            } catch (IOException e) {
-                log.error("Failed to delete old recording: {}", recording.getFilePath(), e);
-            }
-        }
-
-        log.info("Cleaned up {} old recordings", oldRecordings.size());
     }
 }
