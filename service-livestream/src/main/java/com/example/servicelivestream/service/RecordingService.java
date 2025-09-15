@@ -1,7 +1,9 @@
 package com.example.servicelivestream.service;
 
+import com.example.serviceexchange.FeignClient.UserServiceClient;
 import com.example.servicelivestream.dto.RecordingRequest;
 import com.example.servicelivestream.dto.RecordingResponse;
+import com.example.servicelivestream.dto.SkillResponse;
 import com.example.servicelivestream.entity.LivestreamSession;
 import com.example.servicelivestream.entity.Recording;
 import com.example.servicelivestream.feignclient.SkillServiceClient;
@@ -9,6 +11,7 @@ import com.example.servicelivestream.repository.LivestreamSessionRepository;
 import com.example.servicelivestream.repository.RecordingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -21,9 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.*;
@@ -37,6 +38,8 @@ public class RecordingService {
     private final RecordingRepository recordingRepository;
     private final LiveKitService liveKitService;
     private final SkillServiceClient skillServiceClient;
+
+
 
     @Value("${application.recording.directory:./recordings}")
     private String recordingDirectory;
@@ -389,4 +392,136 @@ public class RecordingService {
                 .downloadUrl("/api/v1/livestream/recordings/download/" + recording.getId())
                 .build();
     }
+    @Transactional(readOnly = true)
+    public Map<String, List<RecordingResponse>> getProducerRecordingsGroupedBySkill(Long producerId, String token) {
+        log.info("Getting recordings for producer: {}", producerId);
+
+        // Récupérer toutes les sessions du producteur
+        List<LivestreamSession> sessions = sessionRepository.findByProducerId(producerId);
+
+        Map<String, List<RecordingResponse>> groupedRecordings = new HashMap<>();
+
+        for (LivestreamSession session : sessions) {
+            try {
+                // Récupérer le nom de la compétence
+                SkillResponse skill = skillServiceClient.getSkillById(session.getSkillId());
+                String skillKey = skill.name() + "_" + skill.id();
+
+                // Récupérer les enregistrements de cette session
+                List<Recording> recordings = recordingRepository.findBySessionIdOrderByRecordingNumberAsc(session.getId());
+
+                if (!recordings.isEmpty()) {
+                    List<RecordingResponse> responses = recordings.stream()
+                            .map(this::mapToResponse)
+                            .collect(Collectors.toList());
+
+                    groupedRecordings.computeIfAbsent(skillKey, k -> new ArrayList<>()).addAll(responses);
+                }
+            } catch (Exception e) {
+                log.error("Error fetching skill info for session {}: {}", session.getId(), e.getMessage());
+            }
+        }
+
+        return groupedRecordings;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, List<RecordingResponse>> getReceiverRecordingsGroupedBySkill(Long receiverId, String token) {
+        log.info("Getting recordings for receiver: {}", receiverId);
+
+        // Récupérer toutes les sessions où le receiver est participant
+        List<LivestreamSession> sessions = sessionRepository.findByReceiverIdsContaining(receiverId);
+
+        Map<String, List<RecordingResponse>> groupedRecordings = new HashMap<>();
+
+        for (LivestreamSession session : sessions) {
+            // Vérifier que la session est terminée
+            if (!"COMPLETED".equals(session.getStatus())) {
+                continue;
+            }
+
+            try {
+                // Récupérer le nom de la compétence
+                SkillResponse skill = skillServiceClient.getSkillById(session.getSkillId());
+                String skillKey = skill.name() + "_" + skill.id();
+
+                // Récupérer les enregistrements autorisés pour ce receiver
+                List<Recording> recordings = recordingRepository.findBySessionIdOrderByRecordingNumberAsc(session.getId())
+                        .stream()
+                        .filter(r -> r.getAuthorizedUsers() != null && r.getAuthorizedUsers().contains(receiverId))
+                        .collect(Collectors.toList());
+
+                if (!recordings.isEmpty()) {
+                    List<RecordingResponse> responses = recordings.stream()
+                            .map(this::mapToResponse)
+                            .collect(Collectors.toList());
+
+                    groupedRecordings.computeIfAbsent(skillKey, k -> new ArrayList<>()).addAll(responses);
+                }
+            } catch (Exception e) {
+                log.error("Error fetching skill info for session {}: {}", session.getId(), e.getMessage());
+            }
+        }
+
+        return groupedRecordings;
+    }
+
+    @Transactional(readOnly = true)
+    public List<RecordingResponse> getSkillRecordingsForUser(Integer skillId, Long userId, String token) {
+        log.info("Getting recordings for skill {} and user {}", skillId, userId);
+
+        // Récupérer toutes les sessions de cette compétence
+        List<LivestreamSession> sessions = sessionRepository.findBySkillIdAndStatusIn(
+                skillId,
+                List.of("COMPLETED")
+        );
+
+        List<RecordingResponse> allRecordings = new ArrayList<>();
+
+        for (LivestreamSession session : sessions) {
+            // Vérifier l'autorisation
+            boolean isAuthorized = session.getProducerId().equals(userId) ||
+                    (session.getReceiverIds() != null && session.getReceiverIds().contains(userId));
+
+            if (isAuthorized) {
+                List<Recording> recordings = recordingRepository.findBySessionIdOrderByRecordingNumberAsc(session.getId());
+                allRecordings.addAll(
+                        recordings.stream()
+                                .map(this::mapToResponse)
+                                .collect(Collectors.toList())
+                );
+            }
+        }
+
+        return allRecordings;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Integer, List<RecordingResponse>> getFinishedSkillsRecordings(Long userId, String token) {
+        log.info("Getting finished skills recordings for user {}", userId);
+
+        Map<Integer, List<RecordingResponse>> recordingsBySkill = new HashMap<>();
+
+        // Récupérer les sessions terminées où l'utilisateur est receiver
+        List<LivestreamSession> finishedSessions = sessionRepository
+                .findByReceiverIdsContainingAndStatus(userId, "COMPLETED");
+
+        for (LivestreamSession session : finishedSessions) {
+            List<Recording> recordings = recordingRepository.findBySessionIdOrderByRecordingNumberAsc(session.getId());
+
+            if (!recordings.isEmpty()) {
+                List<RecordingResponse> responses = recordings.stream()
+                        .filter(r -> r.getAuthorizedUsers() != null && r.getAuthorizedUsers().contains(userId))
+                        .map(this::mapToResponse)
+                        .collect(Collectors.toList());
+
+                if (!responses.isEmpty()) {
+                    recordingsBySkill.computeIfAbsent(session.getSkillId(), k -> new ArrayList<>()).addAll(responses);
+                }
+            }
+        }
+
+        return recordingsBySkill;
+    }
+
 }

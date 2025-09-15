@@ -5,16 +5,18 @@ import com.example.servicelivestream.entity.LivestreamSession;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+@Repository
 public interface RecordingRepository extends JpaRepository<Recording, Long> {
 
     @Query("SELECT r FROM Recording r WHERE r.session.id = :sessionId ORDER BY r.recordingNumber ASC")
     List<Recording> findBySessionIdOrderByRecordingNumberAsc(@Param("sessionId") Long sessionId);
 
-    // CHANGÉ: Retourne maintenant une List au lieu d'Optional
     @Query("SELECT r FROM Recording r WHERE r.session.id = :sessionId AND r.status = :status")
     List<Recording> findBySessionIdAndStatus(@Param("sessionId") Long sessionId, @Param("status") String status);
 
@@ -34,4 +36,11 @@ public interface RecordingRepository extends JpaRepository<Recording, Long> {
     // Pour vérifier l'existence d'un enregistrement actif
     @Query("SELECT COUNT(r) > 0 FROM Recording r WHERE r.session.id = :sessionId AND r.status = 'RECORDING'")
     boolean hasActiveRecording(@Param("sessionId") Long sessionId);
+
+    // NOUVELLES MÉTHODES pour les enregistrements par skill (via session)
+    @Query("SELECT r FROM Recording r WHERE r.session.skillId = :skillId")
+    List<Recording> findBySessionSkillId(@Param("skillId") Integer skillId);
+
+    @Query("SELECT r FROM Recording r WHERE r.session.skillId = :skillId AND r.status = :status")
+    List<Recording> findBySessionSkillIdAndStatus(@Param("skillId") Integer skillId, @Param("status") String status);
 }

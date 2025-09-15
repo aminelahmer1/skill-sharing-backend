@@ -23,4 +23,5 @@ public class RecordingResponse {
     private Long duration;
     private Long fileSize;
     private String downloadUrl;
+    private String streamUrl;
 }

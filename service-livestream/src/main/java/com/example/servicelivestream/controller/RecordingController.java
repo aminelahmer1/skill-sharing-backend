@@ -2,7 +2,9 @@ package com.example.servicelivestream.controller;
 
 import com.example.servicelivestream.dto.RecordingRequest;
 import com.example.servicelivestream.dto.RecordingResponse;
+import com.example.servicelivestream.dto.UserResponse;
 import com.example.servicelivestream.entity.Recording;
+import com.example.servicelivestream.feignclient.UserServiceClient;
 import com.example.servicelivestream.repository.RecordingRepository;
 import com.example.servicelivestream.service.RecordingService;
 import lombok.RequiredArgsConstructor;
@@ -28,9 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
@@ -43,7 +43,7 @@ public class RecordingController {
     private String recordingDirectory;
     private final RecordingService recordingService;
     private  final RecordingRepository recordingRepository;
-
+private  final UserServiceClient userServiceClient;
 
     @PostMapping("/upload-recording")
     public ResponseEntity<Map<String, String>> uploadRecording(
@@ -257,36 +257,29 @@ public class RecordingController {
     }
 
     private Long getUserIdFromJwt(Jwt jwt) {
-        // Essayer d'abord avec 'sub' qui devrait contenir l'ID utilisateur
-        Object userIdClaim = jwt.getClaim("sub");
+        // Récupérer le Keycloak ID (UUID) du JWT
+        String keycloakId = jwt.getSubject(); // Ceci retourne "bc214ec2-8ddb-4329-95dd-5fed5ecfe5a4"
 
-        if (userIdClaim != null) {
-            try {
-                // Si c'est un UUID, le convertir en long via hash
-                String userIdStr = userIdClaim.toString();
-                if (userIdStr.contains("-")) { // C'est un UUID
-                    return (long) userIdStr.hashCode() & 0xFFFFFFFFL;
-                } else {
-                    return Long.parseLong(userIdStr);
-                }
-            } catch (NumberFormatException e) {
-                log.warn("Failed to parse user ID from JWT: {}, using hash fallback", userIdClaim);
-                return (long) userIdClaim.toString().hashCode() & 0xFFFFFFFFL;
+        if (keycloakId == null || keycloakId.isEmpty()) {
+            throw new IllegalStateException("No subject found in JWT");
+        }
+
+        try {
+            // Appeler le service utilisateur pour obtenir l'ID réel
+            String token = "Bearer " + jwt.getTokenValue();
+            UserResponse user = userServiceClient.getUserByKeycloakId(keycloakId, token);
+
+            if (user != null && user.id() != null) {
+                log.info("Resolved user ID {} for Keycloak ID {}", user.id(), keycloakId);
+                return user.id();
             }
-        }
 
-        // Fallback - essayer avec d'autres claims
-        String username = jwt.getClaim("preferred_username");
-        if (username != null) {
-            return (long) username.hashCode() & 0xFFFFFFFFL;
-        }
+            throw new IllegalStateException("User not found for Keycloak ID: " + keycloakId);
 
-        String email = jwt.getClaim("email");
-        if (email != null) {
-            return (long) email.hashCode() & 0xFFFFFFFFL;
+        } catch (Exception e) {
+            log.error("Failed to get user ID for Keycloak ID {}: {}", keycloakId, e.getMessage());
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to resolve user ID");
         }
-
-        throw new IllegalStateException("Cannot extract user ID from JWT");
     }
 
 
@@ -346,5 +339,186 @@ public class RecordingController {
     }
 
 
+// Ajouter ces méthodes au RecordingController existant après les méthodes existantes
 
+    @GetMapping("/recordings/producer/{producerId}")
+    public ResponseEntity<Map<String, List<RecordingResponse>>> getProducerRecordings(
+            @PathVariable Long producerId,
+            @AuthenticationPrincipal Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        Long requestingUserId = getUserIdFromJwt(jwt);
+
+        // Vérifier que l'utilisateur demande ses propres enregistrements
+        if (!requestingUserId.equals(producerId)) {
+            log.warn("User {} trying to access producer {} recordings", requestingUserId, producerId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        Map<String, List<RecordingResponse>> groupedRecordings =
+                recordingService.getProducerRecordingsGroupedBySkill(producerId, token);
+        return ResponseEntity.ok(groupedRecordings);
+    }
+
+    @GetMapping("/recordings/receiver/{receiverId}")
+    public ResponseEntity<Map<String, List<RecordingResponse>>> getReceiverRecordings(
+            @PathVariable Long receiverId,
+            @AuthenticationPrincipal Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        Long requestingUserId = getUserIdFromJwt(jwt);
+
+        // Vérifier que l'utilisateur demande ses propres enregistrements
+        if (!requestingUserId.equals(receiverId)) {
+            log.warn("User {} trying to access receiver {} recordings", requestingUserId, receiverId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        Map<String, List<RecordingResponse>> groupedRecordings =
+                recordingService.getReceiverRecordingsGroupedBySkill(receiverId, token);
+        return ResponseEntity.ok(groupedRecordings);
+    }
+
+    @GetMapping("/recordings/skill/{skillId}")
+    public ResponseEntity<List<RecordingResponse>> getSkillRecordings(
+            @PathVariable Integer skillId,
+            @AuthenticationPrincipal Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        Long userId = getUserIdFromJwt(jwt);
+
+        log.info("User {} requesting recordings for skill {}", userId, skillId);
+
+        // Le service vérifiera l'autorisation
+        List<RecordingResponse> recordings =
+                recordingService.getSkillRecordingsForUser(skillId, userId, token);
+
+        if (recordings.isEmpty()) {
+            log.info("No recordings found for skill {} and user {}", skillId, userId);
+        }
+
+        return ResponseEntity.ok(recordings);
+    }
+
+    @GetMapping("/recordings/finished-skills")
+    public ResponseEntity<Map<Integer, List<RecordingResponse>>> getFinishedSkillsRecordings(
+            @AuthenticationPrincipal Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        Long userId = getUserIdFromJwt(jwt);
+
+        log.info("User {} requesting finished skills recordings", userId);
+
+        Map<Integer, List<RecordingResponse>> recordings =
+                recordingService.getFinishedSkillsRecordings(userId, token);
+
+        return ResponseEntity.ok(recordings);
+    }
+
+    @GetMapping("/recordings/producer")
+    public ResponseEntity<Map<String, List<RecordingResponse>>> getCurrentProducerRecordings(
+            @AuthenticationPrincipal Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        Long userId = getUserIdFromJwt(jwt);
+
+        log.info("Current producer {} requesting their recordings", userId);
+
+        Map<String, List<RecordingResponse>> groupedRecordings =
+                recordingService.getProducerRecordingsGroupedBySkill(userId, token);
+        return ResponseEntity.ok(groupedRecordings);
+    }
+
+    @GetMapping("/recordings/receiver")
+    public ResponseEntity<Map<String, List<RecordingResponse>>> getCurrentReceiverRecordings(
+            @AuthenticationPrincipal Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        Long userId = getUserIdFromJwt(jwt);
+
+        log.info("Current receiver {} requesting their recordings", userId);
+
+        Map<String, List<RecordingResponse>> groupedRecordings =
+                recordingService.getReceiverRecordingsGroupedBySkill(userId, token);
+        return ResponseEntity.ok(groupedRecordings);
+    }
+
+    @GetMapping("/recordings/stats")
+    public ResponseEntity<Map<String, Object>> getRecordingStats(
+            @AuthenticationPrincipal Jwt jwt) {
+        String token = "Bearer " + jwt.getTokenValue();
+        Long userId = getUserIdFromJwt(jwt);
+
+        Map<String, Object> stats = new HashMap<>();
+
+        try {
+            // Déterminer si l'utilisateur est producteur ou receiver
+            boolean isProducer = isUserProducer(jwt);
+
+            Map<String, List<RecordingResponse>> recordings;
+            if (isProducer) {
+                recordings = recordingService.getProducerRecordingsGroupedBySkill(userId, token);
+            } else {
+                recordings = recordingService.getReceiverRecordingsGroupedBySkill(userId, token);
+            }
+
+            // Calculer les statistiques
+            int totalRecordings = 0;
+            long totalDuration = 0;
+            long totalSize = 0;
+            Map<String, Integer> recordingsBySkill = new HashMap<>();
+
+            for (Map.Entry<String, List<RecordingResponse>> entry : recordings.entrySet()) {
+                String skillKey = entry.getKey();
+                List<RecordingResponse> recs = entry.getValue();
+
+                totalRecordings += recs.size();
+                recordingsBySkill.put(skillKey, recs.size());
+
+                for (RecordingResponse rec : recs) {
+                    if (rec.getDuration() != null) {
+                        totalDuration += rec.getDuration();
+                    }
+                    if (rec.getFileSize() != null) {
+                        totalSize += rec.getFileSize();
+                    }
+                }
+            }
+
+            stats.put("totalRecordings", totalRecordings);
+            stats.put("totalDuration", totalDuration);
+            stats.put("totalSize", totalSize);
+            stats.put("recordingsBySkill", recordingsBySkill);
+            stats.put("userType", isProducer ? "PRODUCER" : "RECEIVER");
+
+        } catch (Exception e) {
+            log.error("Error calculating recording stats for user {}: {}", userId, e.getMessage());
+            stats.put("error", "Failed to calculate statistics");
+        }
+
+        return ResponseEntity.ok(stats);
+    }
+
+    // Méthode helper pour vérifier si l'utilisateur est producteur
+    private boolean isUserProducer(Jwt jwt) {
+        // Vérifier les rôles dans le JWT
+        List<String> roles = new ArrayList<>();
+
+        // Essayer realm_access.roles
+        Map<String, Object> realmAccess = jwt.getClaim("realm_access");
+        if (realmAccess != null && realmAccess.containsKey("roles")) {
+            Object rolesObj = realmAccess.get("roles");
+            if (rolesObj instanceof List) {
+                roles.addAll((List<String>) rolesObj);
+            }
+        }
+
+        // Essayer resource_access.backend-service.roles
+        Map<String, Object> resourceAccess = jwt.getClaim("resource_access");
+        if (resourceAccess != null && resourceAccess.containsKey("backend-service")) {
+            Map<String, Object> backendService = (Map<String, Object>) resourceAccess.get("backend-service");
+            if (backendService != null && backendService.containsKey("roles")) {
+                Object rolesObj = backendService.get("roles");
+                if (rolesObj instanceof List) {
+                    roles.addAll((List<String>) rolesObj);
+                }
+            }
+        }
+
+        return roles.contains("PRODUCER");
+    }
 }
