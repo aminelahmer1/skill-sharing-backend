@@ -1,54 +1,4 @@
 services:
-  egress:
-    image: livekit/egress:latest
-    container_name: livekit-egress
-    ports:
-      - "7885:8080"
-    environment:
-      # Configuration principale
-      - LIVEKIT_API_KEY=testkey
-      - LIVEKIT_API_SECRET=akQ2cFd4OEx0UDlyWmU3MnNZcTNtWGZOdEE0a1Z1MTIzCg==
-      - LIVEKIT_WS_URL=ws://livekit:7880
-
-      # Redis
-      - REDIS_ADDRESS=redis:6379
-
-      # Configuration d'enregistrement
-      - FILE_OUTPUT_PATH=/recordings/
-      - DISABLE_MANIFEST=false
-
-      # Qualité vidéo
-      - VIDEO_WIDTH=1280
-      - VIDEO_HEIGHT=720
-      - VIDEO_FRAMERATE=30
-
-      # Audio
-      - AUDIO_FREQUENCY=48000
-      - AUDIO_BITRATE=128
-
-      # Serveur
-      - HEALTH_PORT=8080
-      - LOG_LEVEL=info
-
-      # Template (optionnel)
-      - TEMPLATE_BASE=/templates
-
-    volumes:
-      - ./recordings:/recordings
-    cap_add:
-      - SYS_ADMIN
-    networks:
-      - skillsharing-net
-    depends_on:
-      - livekit
-      - redis
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   livekit:
     image: livekit/livekit-server:v1.7.2
@@ -131,27 +81,7 @@ services:
     networks:
       - skillsharing-net
     restart: unless-stopped
-  mongodb:
-    image: mongo
-    container_name: mongo_db
-    ports:
-      - 27017:27017
-    volumes:
-      - mongo:/data
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=alibou
-      - MONGO_INITDB_ROOT_PASSWORD=alibou
 
-  mongo-express:
-    image: mongo-express
-    container_name: mongo_express
-    restart: always
-    ports:
-      - 8091:8081
-    environment:
-      - ME_CONFIG_MONGODB_ADMINUSERNAME=alibou
-      - ME_CONFIG_MONGODB_ADMINPASSWORD=alibou
-      - ME_CONFIG_MONGODB_SERVER=mongodb
 
   zipkin:
     container_name: zipkin
