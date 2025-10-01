@@ -495,7 +495,8 @@ public class ConversationService {
             log.debug("Conversation skill existante : {}", conversation.getId());
         } else {
             SkillResponse skill = fetchSkill(skillId);
-            String name = (skill != null) ? "Skill: " + skill.name() : "Skill Discussion: " + skillId;
+            // ✅ CORRECTION : Suppression du préfixe "Skill:"
+            String name = (skill != null) ? skill.name() : "Discussion " + skillId;
 
             conversation = Conversation.builder()
                     .name(name)
